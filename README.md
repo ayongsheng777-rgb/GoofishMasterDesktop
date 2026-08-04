@@ -1,66 +1,236 @@
 # GoofishMasterDesktop
 
-把原 `goofish-master` Docker 微服务系统改造为**一键桌面服务端**的独立项目。
-与原 Docker 项目**完全解耦**：独立目录、独立端口（8911–8914）、独立数据目录，互不影响运行。
+**闲鱼圣手桌面独立运行端** —— 飞书智能体二手商品情报系统的本地桌面运行形态。
 
-> 这是「桌面服务端技术计划书」的落地工程。当前进度：P0 骨架 + 启动编排器 + 桌面壳 + 冒烟验证。
+四个微服务（飞书智能体 / AI 路由 / 分析编排 / 采集服务）由统一编排器拉起、健康巡检并优雅关停，**零 Docker、零命令行、零外部数据库**——双击即用。所有数据存储（SQLite / fakeredis / Chroma）全部进程内嵌入式，随程序同级落盘。
+
+## 特性
+
+- **双击即用**：PyInstaller 单 exe + Inno Setup 安装包，无需安装 Python / Docker / PostgreSQL / Redis / Qdrant
+- **全嵌入式数据层**：PostgreSQL→SQLite、Redis→fakeredis、Qdrant→Chroma，默认全开，零外部依赖
+- **桌面控制台**：pywebview + 系统托盘，可视化查看服务状态 / 日志 / 配置，一键启停
+- **飞书长连接**：WebSocket 直连飞书，**无需公网 IP / 回调域名**——家用网络即可
+- **多模型路由**：DeepSeek（主） / Gemini（视觉） / Qwen（备 + embedding），热切换不重启
+- **RAG 知识库**：Chroma 向量库 + 语义检索，分析时自动注入相似案例
+- **优雅降级**：后端可单独关闭，主功能不受影响；前端只对真异常弹红告警
+
+## 架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│           GoofishMasterDesktop.exe（编排器）              │
+│   双击 → 桌面控制台 + 自动拉起 4 服务 + 系统托盘常驻       │
+└────────────┬────────────────────────────────────────────┘
+             │ subprocess（按依赖顺序）
+   ┌─────────┴─────────┬──────────────┬──────────────┐
+   ▼                   ▼              ▼              ▼
+feishu-agent        ai-router     agent-pipeline  spider-service
+  :8911               :8912          :8913           :8914
+飞书长连接+WebUI    多模型路由+RAG   编排+决策打分    闲鱼采集
+   │                   │              │              │
+   └─── fakeredis ─────┴── SQLite ────┴── Chroma ────┘
+                        （全部进程内嵌入式）
+```
+
+| 服务 | 端口 | 职责 |
+|------|------|------|
+| feishu-agent | 8911 | 飞书 WebSocket 长连接 + WebUI 管理后台 |
+| ai-router | 8912 | 多模型路由（DeepSeek/Gemini/Qwen）+ RAG |
+| agent-pipeline | 8913 | 搜索编排 + AI 三维分析 + 决策打分 |
+| spider-service | 8914 | 闲鱼商品采集（Playwright 无头浏览器） |
+
+全部绑定 `127.0.0.1`，仅本机可访问。
+
+## 安装
+
+### 方式一：安装包（推荐普通用户）
+
+1. 下载 `GoofishMasterDesktop-Setup-1.0.0.exe`
+2. 双击运行安装向导
+3. 选择安装路径（默认 `D:\GoofishMasterDesktop`，可改）
+4. 设置 4 个服务端口（默认 8911-8914，可改，均绑定 127.0.0.1）
+5. 勾选「创建桌面快捷方式」
+6. 安装完成 → 桌面双击 `GoofishMasterDesktop` 即用
+
+> 安装包已内置全部依赖（含 chromadb / fakeredis / aiosqlite），无需任何额外安装。
+> Windows 10/11 一般自带 WebView2 Runtime；纯离线机器需先装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+
+### 方式二：源码运行（开发者）
+
+```bash
+git clone https://github.com/ayongsheng777-rgb/GoofishMasterDesktop.git
+cd GoofishMasterDesktop
+
+# Python 3.13+
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+
+# 采集服务需要 Playwright Chromium
+playwright install chromium
+
+# 启动全部服务（命令行模式）
+python launcher.py start
+
+# 或打开桌面控制台（GUI 模式）
+python desktop/app.py
+```
+
+首次运行会在 `config/config.json` 自动生成配置（含随机 `secret_key`）。
+
+### 方式三：便携版
+
+下载 `release/GoofishMasterDesktop/` 整个目录，双击 `GoofishMasterDesktop.exe` 即可，无需安装。配置与数据落在 exe 同级目录。
+
+## 配置
+
+配置文件：`config/config.json`（首次启动自动生成）。修改后需重启服务生效。
+
+```json
+{
+  "secret_key": "（首次启动自动生成）",
+  "ports": {
+    "feishu_agent": 8911,
+    "ai_router": 8912,
+    "agent_pipeline": 8913,
+    "spider": 8914
+  },
+  "backends": {
+    "postgres": { "enabled": true },
+    "redis": { "enabled": true },
+    "qdrant": { "enabled": true }
+  },
+  "feishu": {
+    "app_id": "cli_xxxx",
+    "app_secret": "xxxx"
+  },
+  "ai": {
+    "deepseek_api_key": "sk-xxxx",
+    "gemini_api_key": "",
+    "qwen_api_key": "",
+    "proxy_url": ""
+  }
+}
+```
+
+**必填项**：
+- `feishu.app_id` / `feishu.app_secret` —— 飞书自建应用凭证
+- `ai.deepseek_api_key` —— 主 AI 模型（必填，否则分析功能不可用）
+
+**可选项**：
+- `ai.gemini_api_key` —— 视觉分析（识图），走代理
+- `ai.qwen_api_key` —— 备用聊天模型 + RAG embedding（`text-embedding-v3`）
+- `ai.proxy_url` —— 访问境外 AI 服务的 HTTP 代理地址
+
+**后端开关**（默认全开，一般无需动）：
+- `backends.postgres.enabled` → 实际用 SQLite
+- `backends.redis.enabled` → 实际用 fakeredis
+- `backends.qdrant.enabled` → 实际用 Chroma
+- 全部置 `false` 会优雅降级（主功能不受影响，但持久化监控 / 会话缓存 / RAG 会禁用）
+
+## 操作说明
+
+### 桌面控制台（GUI）
+
+双击 exe 后打开控制台窗口，功能：
+
+- **服务状态**：实时显示 4 服务的运行状态（健康/启动中/已停止）+ PID，每 3 秒刷新
+- **全部启动 / 全部停止**：一键控制
+- **重启单个服务**：点服务卡片「重启」按钮
+- **运行日志**：选择服务查看最近 300 行日志，支持自动刷新
+- **配置概览**：端口 / 后端启用状态 / AI Key 配置情况 / 飞书凭证
+- **打开管理后台**：用系统默认浏览器打开 `http://127.0.0.1:8911`（WebUI 管理面板）
+- **打开数据目录**：在资源管理器中打开数据目录（配置 / 日志 / 数据库文件）
+- **系统托盘**：关闭窗口→最小化到托盘；托盘菜单可显示控制台 / 启停服务 / 退出
+
+### 命令行
+
+```bash
+GoofishMasterDesktop.exe              # 打开桌面控制台（默认）
+GoofishMasterDesktop.exe start        # 无界面服务端模式
+GoofishMasterDesktop.exe stop         # 停止全部服务
+GoofishMasterDesktop.exe status       # 查看服务状态
+GoofishMasterDesktop.exe restart <name>  # 重启指定服务
+```
+
+### WebUI 管理后台
+
+浏览器访问 `http://127.0.0.1:8911`（端口取自配置）：
+
+- **系统总览**：服务健康 / 基础设施状态 / 降级功能提示
+- **AI 配置**：在线配置各模型 Key，热更新不重启
+- **RAG 知识库**：管理向量库条目
+- **采集任务**：手动触发闲鱼商品搜索 / 分析
+- **历史结果**：查看 AI 分析过的商品卡片
+
+## 构建
+
+### 构建 exe（开发者）
+
+```bash
+# 环境：Python 3.13 + .venv + 依赖已装
+.venv\Scripts\python.exe -m PyInstaller GoofishMasterDesktop.spec --noconfirm
+# 产物在 dist/GoofishMasterDesktop/
+```
+
+> ⚠️ 若 build/dist 目录已存在，PyInstaller `--clean` 会被 Windows 安全删除拦截。
+> 解决：先用 PowerShell `Remove-Item -Recurse` 清掉 build/dist，再不带 `--clean` 构建。
+
+### 构建安装包
+
+需先安装 [Inno Setup 6](https://jrsoftware.org/isdl.php)。
+
+```bash
+# 先确保 release/GoofishMasterDesktop/ 是最新构建产物
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" GoofishMasterDesktop.iss
+# 产物在 installer/GoofishMasterDesktop-Setup-1.0.0.exe
+```
 
 ## 目录结构
 
 ```
 GoofishMasterDesktop/
-├─ launcher.py            # 启动编排器（拉起 4 服务 / 健康检查 / 崩溃重启）
-├─ desktop/app.py         # 桌面壳（pywebview + 托盘），调用 launcher
-├─ common/config.py       # 配置中心（读 config/config.json）
-├─ backends/local.py      # 可选：拉起嵌入式 postgres/redis/qdrant 二进制
-├─ config.example.json    # 配置示例
-├─ requirements.txt       # 依赖清单
-├─ services/              # 复制自原项目的 4 个服务（已隔离，零关联）
-│  ├─ feishu-agent/       # :8911 飞书机器人 + WebUI
-│  ├─ ai-router/          # :8912 多模型路由 + RAG
-│  ├─ agent-pipeline/     # :8913 编排
-│  └─ spider-service/     # :8914 闲鱼采集（需 Playwright Chromium）
-├─ knowledge-base/        # RAG 知识库（复制）
-└─ data/                  # 运行时数据（SQLite/日志/账号态），gitignore
+├── launcher.py              # 启动编排器（拉起 4 服务 / 健康检查 / 看门狗）
+├── desktop/                 # 桌面控制台（pywebview + 系统托盘）
+│   ├── app.py               # 桌面壳
+│   ├── api.py               # JS 桥接 API
+│   └── ui/                  # 控制台前端（HTML/CSS/JS）
+├── common/config.py         # 配置中心
+├── services/                # 4 个微服务
+│   ├── feishu-agent/        # 飞书长连接 + WebUI
+│   ├── ai-router/           # 多模型路由 + RAG
+│   ├── agent-pipeline/      # 编排 + 决策打分
+│   └── spider-service/      # 闲鱼采集
+├── knowledge-base/          # RAG 知识库
+├── GoofishMasterDesktop.spec      # PyInstaller 打包配置
+├── GoofishMasterDesktop.iss       # Inno Setup 安装包脚本
+├── config.example.json      # 配置示例
+└── requirements.txt         # Python 依赖
 ```
 
-## 快速开始
+## 排障
 
-```bash
-cd GoofishMasterDesktop
-python -m venv .venv && .venv\Scripts\activate
-pip install -r requirements.txt
-playwright install chromium        # spider 采集需要浏览器
+| 现象 | 处理 |
+|------|------|
+| 双击 exe 无窗口 | 装 Microsoft Edge WebView2 Runtime |
+| 双击闪退 | 看 `data/logs/desktop-crash.log`；命令行 `GoofishMasterDesktop.exe start` 确认服务端是否能起 |
+| 8911 打不开 WebUI | 看 `data/logs/feishu-agent.log`；确认服务已启动 |
+| 采集失败 | `playwright install chromium`（开发模式）；安装包版需额外分发浏览器 |
+| AI 分析失败 | 检查 `config.json` 的 `ai.deepseek_api_key`；境外模型需配 `ai.proxy_url` |
+| 飞书收不到消息 | 检查 `feishu.app_id/app_secret`；看日志长连接是否建立 |
+| 端口被占 | 改 `config.json` 的 `ports.*` 或安装时填新端口 |
 
-# 启动全部后端（CLI）
-python launcher.py start
-# 查看状态
-python launcher.py status
-# 打开管理面板：浏览器访问 http://127.0.0.1:8911
-# 停止
-python launcher.py stop
+## 技术栈
 
-# 或直接运行桌面壳（托盘 + WebView）
-python desktop/app.py
-```
+- **Python 3.13** + FastAPI + Uvicorn（4 微服务）
+- **PyInstaller**（冻结为单 exe）
+- **pywebview** + **pystray**（桌面控制台 + 系统托盘）
+- **aiosqlite**（嵌入式 SQLite，替代 PostgreSQL）
+- **fakeredis**（进程内 Redis 兼容层）
+- **chromadb**（嵌入式向量库，替代 Qdrant）
+- **Playwright**（闲鱼采集无头浏览器）
+- **Inno Setup 6**（Windows 安装包）
 
-首次运行会自动在 `config/config.json` 生成随机 `secret_key`。
+## License
 
-## 配置
-
-编辑 `config/config.json`：
-- `feishu.app_id` / `app_secret`：飞书应用凭证
-- `ai.deepseek_api_key` 等：AI 模型 Key
-- `backends.*.enabled`：启用嵌入式本地后端（需先在 `backends/bin/` 放置二进制）
-
-## 已知限制（当前里程碑）
-
-- DB / Redis / Qdrant 未启动时，服务会**优雅降级**（连不上返回 None，不崩溃）；
-  完整功能需启用 `backends` 或后续 P1 单用户化（SQLite/fakeredis/Chroma）。
-- spider 采集依赖 Playwright Chromium，需在目标机 `playwright install chromium`。
-- 桌面 GUI 在无图形环境（CI/服务器）下会自动跳过，仅启动后端。
-
-## 与原项目的关系
-
-仅**复制源码**到 `services/`，未修改原 `goofish-master` 任何文件，原 Docker 项目运行不受影响。
-端口刻意偏移 +10，避免与本机运行的原项目（8901–8904）冲突。
+Private

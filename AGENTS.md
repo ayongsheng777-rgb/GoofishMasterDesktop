@@ -1,24 +1,22 @@
 # AGENTS.md — GoofishMasterDesktop
 
 > 本手册是维护本项目的权威依据。**改代码 / 排障 / 新增能力前先读它。**
-> 面向：AI 维护者、接手开发者。定位：把原 Docker 微服务集群改造成「双击即用」的桌面服务端。
+> 面向：AI 维护者、接手开发者。定位：从零搭建的「双击即用」桌面服务端——飞书智能体二手商品情报系统的本地运行形态。
 
 ---
 
 ## 0. 一句话定位
 
-把原 `goofish-master` 的 4 个 Python 微服务**脱离 Docker**，由本地启动器（`launcher.py`）按依赖顺序编排拉起，配合桌面 GUI 壳（`desktop/app.py`，pywebview + 系统托盘）和浏览器管理面板（`feishu-agent` WebUI），实现**零 Docker、零命令行、本地数据**的桌面服务端形态。
+4 个 Python 微服务**脱离 Docker**，由本地启动器（`launcher.py`）按依赖顺序编排拉起，配合桌面 GUI 壳（`desktop/app.py`，pywebview + 系统托盘）和浏览器管理面板（`feishu-agent` WebUI），实现**零 Docker、零命令行、零外部数据库、本地数据**的桌面服务端形态。所有数据存储（SQLite / fakeredis / Chroma）进程内嵌入式，随 exe 同级落盘。
 
-**与原 Docker 项目零关联**：这是源码副本，不是 git submodule，端口整体偏移 +10，独立数据目录。改本项目不影响原项目，反之亦然。
-
-**界面不暴露 Docker/容器术语**：桌面 GUI 控制台与管理面板（WebUI）**不再使用「免 Docker」「无 Docker 版」「请检查容器状态」等措辞**——可选后端未启用时统一显示中性「可选组件未启用」，异常时显示「请检查服务状态」。这是产品定位（独立桌面运行端）与降降级体验的一致性要求，新增 UI 文案时务必遵守。
+**界面不暴露 Docker/容器术语**：桌面 GUI 控制台与管理面板（WebUI）**不使用「免 Docker」「无 Docker 版」「请检查容器状态」等措辞**——可选后端未启用时统一显示中性「可选组件未启用」，异常时显示「请检查服务状态」。这是产品定位（独立桌面运行端）与降级体验的一致性要求，新增 UI 文案时务必遵守。
 
 ---
 
 ## 1. 关键事实（先读，避免踩坑）
 
-1. **完全独立**：4 个服务源码复制到 `services/`，是上游副本。上游改了不会自动同步，需手动 diff 复制。
-2. **端口整体偏移 +10**（避开本机原 Docker 占用的 8901–8904）：
+1. **独立项目**：4 个服务源码在 `services/`，由本项目自有维护。端口整体偏移 +10（8911-8914）。
+2. **端口整体偏移 +10**：
    - `feishu_agent = 8911`（管理面板 + 飞书长连接）
    - `ai_router   = 8912`（多模型路由 + RAG）
    - `agent_pipeline = 8913`（编排 + 决策打分）
@@ -48,7 +46,7 @@ GoofishMasterDesktop/
 ├── requirements.txt     # Python 依赖
 ├── config.example.json  # 配置样例
 ├── config/config.json   # 实际配置（自动生成，gitignore）
-├── services/            # 4 个微服务副本
+├── services/            # 4 个微服务
 │   ├── feishu-agent/    # 飞书长连接 + WebUI 管理后台（:8911）
 │   ├── ai-router/       # 多模型路由 + RAG（:8912）
 │   ├── agent-pipeline/  # 编排 + 决策打分（:8913）
@@ -169,7 +167,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - spider 特有：`RUN_HEADLESS=true`、`RUNNING_IN_DOCKER=false`、`ACCOUNT_STATE_DIR`。
 - **每服务数据目录 `DATA_DIR`**：4 个服务全部注入，值 = `APP_DIR/data/<sub>`（`sub` ∈ `feishu-agent` / `ai-router` / `agent-pipeline` / `spider`；spider 另有 `spider-state`）。ai-router 额外注入只读的 `KNOWLEDGE_DIR = ROOT/knowledge-base`。服务侧兜底值必须与此一致，见 §9。
 
-**改端口**：直接改 `config.json` 的 `ports.*`（注意避开原 Docker 8901–8904 与本机其他占用）。
+**改端口**：直接改 `config.json` 的 `ports.*`（注意避开本机其他占用）。
 
 **`%APPDATA%` 回退目录改名（向后兼容）**：品牌统一后新目录是 `%APPDATA%/GoofishMasterDesktop`，但 `_app_dir()` 会**先探测旧目录 `%APPDATA%/goofish-server`（及 `~/.goofish-server`）是否存在**，存在则继续沿用，避免老版本用户配置被孤立。要彻底切新目录，手工把旧目录改名即可。
 
@@ -183,16 +181,16 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - `redis` → **fakeredis**（进程内内存兼容层，API 与原 Redis 完全一致）
 - `qdrant` → **Chroma**（chromadb.PersistentClient，落盘 `DATA_DIR/chroma`，RAG 向量）
 
-改动集中在 `services/` 副本的 DB/RAG 驱动层（详见 §3.1），原「嵌入式原生二进制」过渡方案（`backends/bin/` 放 exe）已废弃并删除 `backends/`。`backends.*.enabled=false` 仍可优雅降级（对应功能禁用）。
+改动集中在 `services/` 的 DB/RAG 驱动层（详见 §3.1）。`backends.*.enabled=false` 仍可优雅降级（对应功能禁用）。
 
 ---
 
-## 7. 与原 Docker 项目的关系
+## 7. 项目独立性
 
-- `services/` 是 `goofish-master` 4 个服务的**源码副本**，不是 submodule/git 链接。
-- 端口 +10 隔离，数据目录独立（`data/` vs docker volume），互不干扰。
-- **同步上游修复**：手动 `diff -rq` 比对后复制对应文件。注意复制的是「副本」，本项目对 `services/` 的任何改动都会让副本与上游分叉。
-- 本项目**独有**的代码：`launcher.py`、`common/`、`desktop/`、`smoke_test.py`、`config.example.json`——这些才是桌面化的核心，别动错了上游副本的逻辑。
+- 本项目是从零搭建的独立桌面服务端，`services/` 下 4 个微服务源码由本项目自有维护。
+- 端口 8911-8914 绑定 127.0.0.1，数据目录独立（`data/`），与宿主机其它进程互不干扰。
+- **本项目独有**的核心代码：`launcher.py`、`common/`、`desktop/`、`smoke_test.py`、`config.example.json`、`GoofishMasterDesktop.spec`、`GoofishMasterDesktop.iss`——这些是桌面化与打包的核心，改它们等于改本项目地基。
+- `services/` 下各服务的业务逻辑（飞书对接 / AI 调用 / 采集 / 决策）是产品能力的载体，维护时直接改即可，不存在「上游同步」概念。
 
 ---
 
@@ -201,7 +199,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 1. **spider 采集**：目标机需 `playwright install chromium`（约 150MB），本环境未装 → spider 暂不可用。
 2. **完整 DB 能力**：P1 已默认全开（进程内 SQLite/fakeredis/Chroma），无需外部二进制；`backends.*.enabled=false` 才降级。
 3. **桌面 GUI 实测**：pywebview 需在 Windows 图形环境跑（无头环境自动跳过只启后端）。
-4. **打包成 .exe**：✅ 已完成。PyInstaller onedir 冻结为单个 `GoofishMasterDesktop.exe`（单二进制多模式，详见 §12）。安装包（InnoSetup/NSIS）仍未做（计划书 P5 收尾）。
+4. **打包成 .exe**：✅ 已完成（PyInstaller onedir，详见 §11/§13）。**安装包**：✅ 已完成（Inno Setup 6，`GoofishMasterDesktop.iss`，产物 `installer/GoofishMasterDesktop-Setup-1.0.0.exe`，详见 README.md）。
 5. **安全**：`secret_key` 明文存 `config.json`；未做配置加密、未做代码签名（发布前需预算）。
 6. **更新通道**：自动更新 / 增量升级未实现。
 7. **✅ 发布产物已刷新**：`release/GoofishMasterDesktop/`（`GoofishMasterDesktop.exe` 30.5 MB + `_internal/`，2026-08-04 重打包，已剔除内嵌 config）。
@@ -217,7 +215,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 ## 8.1 本次维护记录（命名统一 + 路径 BUG）
 
 **命名统一**：源码层 `闲鱼圣手` / `Goofish Master` / `GOOFISH MASTER` / `goofish-server` 全部收敛为 **`GoofishMasterDesktop`**（17 个文件）。spec 改名 `goofish-server.spec → GoofishMasterDesktop.spec`、`build_server.spec → GoofishMasterDesktop-debug.spec`。
-**未动**的标识（故意保留，属基础设施/上游约定，改了会连锁炸）：`GOOFISH_SECRET_KEY` 环境变量、PG 的 `goofish/goofish_v2_secret/goofish_ai`、Qdrant 集合 `goofish_kb`、对上游项目 `goofish-master` 的引用。
+**未动**的标识（故意保留，属基础设施约定，改了会连锁炸）：`GOOFISH_SECRET_KEY` 环境变量、PG 的 `goofish/goofish_v2_secret/goofish_ai`、Qdrant 集合 `goofish_kb`。
 
 **修复的 BUG**：
 
@@ -239,25 +237,29 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。
 - **.venv 重建**：`python -m venv .venv --clear` 会因批量删除被拦截。正确做法：先 `mv .venv .venv_bak`（rename 不是删除），再新建 `.venv` 并 `pip install -r requirements.txt`，确认无误后删 `.venv_bak`。
 - **依赖导入名陷阱**：`pywebview` 导入名是 `webview`；`pyyaml` 导入名是 `yaml`。测试写错名会误判缺包。
-- **改 services/ == 改上游副本**：记得 §7 的同步关系；本项目桌面化逻辑只在 `launcher/common/desktop`。
-- **端口冲突**：永远用 8911–8914，不要回退到 8901–8904（原 Docker 占用）。
+- **改 services/ 是改本项目业务逻辑**：`services/` 由本项目自有维护，不存在上游副本概念；桌面化逻辑在 `launcher/common/desktop`。
+- **端口冲突**：永远用 8911–8914，不要回退到 8901–8904。
 - **日志优先**：排障先看 `data/logs/<svc>.log`；launcher 主日志在 stdout。
-- **🚨 Docker 绝对路径是头号污染源**：上游副本里的 `Path(os.environ.get("DATA_DIR", "/app/data"))` 这类写法，在 Windows 上 `/app/data` 会被解析成 **`<当前盘符>:\app\data`**，于是在盘符根建垃圾目录、把数据写到项目外。从上游同步任何 `services/` 文件后，**必须 grep `"/app/`** 并改成项目内兜底：
+- **🚨 Docker 风格绝对路径是头号污染源**：`services/` 里若有 `Path(os.environ.get("DATA_DIR", "/app/data"))` 这类写法，在 Windows 上 `/app/data` 会被解析成 **`<当前盘符>:\app\data`**，于是在盘符根建垃圾目录、把数据写到项目外。新增或修改 `services/` 文件后，**必须 grep `"/app/`** 并改成项目内兜底：
   ```python
   DATA_DIR = Path(os.environ.get("DATA_DIR")
                   or Path(__file__).resolve().parents[2] / "data" / "<svc>")
   ```
   兜底子目录名必须与 `launcher._data_dir()` 注入的一致（`feishu-agent` / `ai-router` / `agent-pipeline` / `spider` / `spider-state`），否则「launcher 起的服务」和「裸跑的模块」会读写两套目录。
-- **别只信环境变量**：有函数把路径写死成默认参数（如原 `feishu_bot.save/load_credentials` 的 `/app/data/credentials.json`），完全绕过 `DATA_DIR`，症状是「后台配好了但机器人读不到」。改路径时要连默认参数一起 grep。
+- **别只信环境变量**：有函数把路径写死成默认参数（如 `feishu_bot.save/load_credentials` 的 `/app/data/credentials.json`），完全绕过 `DATA_DIR`，症状是「后台配好了但机器人读不到」。改路径时要连默认参数一起 grep。
+
+> 历史背景：本项目早期从 `goofish-master` Docker 项目 fork 而来，已于 2026-08 独立为从零搭建的桌面服务端项目。上述 Docker 风格路径残留是 fork 期的历史包袱，新代码不应再引入此类写法。
 
 ---
 
 ## 10. Git 纪律
 
-- 工作目录：`D:\WorkBuddy\GoofishMasterDesktop`（已脱离 `goofish-master/`）。
-- `.venv/`、`config/config.json`、`data/` 已 gitignore。
-- `git push` 走代理时单次置空：`git -c http.proxy= -c https.proxy= push`（避免代理干扰 git smart HTTP 协议）。
-- 提交信息用中文，说明「改了哪层（launcher/common/backends/desktop 还是 services 副本）」。
+- 工作目录：`D:\WorkBuddy\GoofishMasterDesktop`。
+- GitHub：`ayongsheng777-rgb/GoofishMasterDesktop`（Private）
+- `.venv/`、`config/config.json`、`data/`、`build/`、`dist/`、`release/`、`installer/` 已 gitignore。
+- git 邮箱用 noreply 隐私保护：`277914440+ayongsheng777-rgb@users.noreply.github.com`
+- `git push` 不走代理（`git config --global --unset http/https.proxy` 后直连），避免代理干扰 git smart HTTP 协议。
+- 提交信息用中文，说明改了哪层（launcher/common/desktop 还是 services 业务逻辑）。
 
 ---
 
@@ -275,7 +277,10 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **资源目录 `ROOT`** = `sys._MEIPASS`（PyInstaller onedir 的 `_internal`）：存放 `services/`、`knowledge-base/`、`common/` 等**只读**资源。
 - **可写应用目录 `APP_DIR`** = exe 同级目录（便携版可直接写）；若不可写（如安装到 `Program Files`）则回退到 `%APPDATA%/GoofishMasterDesktop`。`config.json`、运行日志、各服务 `DATA_DIR` 全部落在 `APP_DIR`，保证安装版也能写。
 
-### 构建命令（已在 `.build/` 验证）
+### 构建命令（历史内联参考，规范方式见下方 spec）
+
+> 以下内联命令为早期构建参考，依赖项已变更（`qdrant_client`/`asyncpg` 已移除，改为 `chromadb`/`fakeredis`/`aiosqlite`）。**日常构建请用下方 spec 方式**。
+
 ```bash
 cd D:\WorkBuddy\GoofishMasterDesktop
 .venv\Scripts\python.exe -m PyInstaller --name GoofishMasterDesktop --onedir --windowed --noconfirm --clean ^
@@ -284,7 +289,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
   --exclude-module webview --exclude-module pystray --exclude-module tkinter ^
   --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide2 --exclude-module PySide6 ^
   --exclude-module PyQt4 --exclude-module PySide ^
-  --collect-all lark_oapi --collect-all qdrant_client --collect-all asyncpg ^
+  --collect-all lark_oapi --collect-all chromadb --collect-all fakeredis --collect-all aiosqlite ^
   --collect-all openai --collect-all playwright --collect-all fastapi --collect-all uvicorn ^
   --collect-all redis --collect-all httpx --collect-all websockets --collect-all segno --collect-all pyotp ^
   --collect-all cryptography --collect-all yaml --collect-all aiofiles --collect-all requests ^
@@ -293,21 +298,17 @@ cd D:\WorkBuddy\GoofishMasterDesktop
   --workpath <干净临时dir> --distpath <干净临时dir> launcher.py
 ```
 
-> 📌 **规范构建方式（推荐）**：上面的内联命令等价于仓库里的 **`GoofishMasterDesktop.spec`**（`console=False` 即 `--windowed`，已含 `--collect-all webview/pystray` + `desktop.ui` + `hidden-import desktop.api/desktop.app`）。日常重建直接：
+> 📌 **规范构建方式（推荐）**：上面的内联命令等价于仓库里的 **`GoofishMasterDesktop.spec`**（`console=False` 即 `--windowed`，已含 `--collect-all webview/pystray` + `desktop` 数据文件 + `hidden-import webview.platforms.edgechromium` + 嵌入式库）。日常重建直接：
 > ```bash
 > cd D:\WorkBuddy\GoofishMasterDesktop
-> TS=$(date +%s)
-> .venv\Scripts\python.exe -m PyInstaller GoofishMasterDesktop.spec --noconfirm --clean ^
->   --workpath "D:/tmp/gf_work_$TS" --distpath "D:/tmp/gf_dist_$TS"
-> # 构建产物在 D:\d\tmp\gf_dist_<TS>\GoofishMasterDesktop\ ；合并进 release：
-> robocopy /E /PURGE "D:/d/tmp/gf_dist_$TS/GoofishMasterDesktop/_internal" "release/GoofishMasterDesktop/_internal"
-> copy /Y "D:/d/tmp/gf_dist_$TS/GoofishMasterDesktop/GoofishMasterDesktop.exe" "release/GoofishMasterDesktop/"
+> # 先清 build/dist（PowerShell，避免 safe-delete 拦截）
+> # .venv\Scripts\python.exe -m PyInstaller GoofishMasterDesktop.spec --noconfirm
+> # 产物在 dist/GoofishMasterDesktop/
 > ```
-> ⚠️ **构建坑（必看）**：本机安全删除会拦截 `rm -rf` / PyInstaller `--noconfirm` 对已存在目录的清理。务必每次用**全新的 `--workpath`/`--distpath`**（如带时间戳），不要删旧目录、不要对已有目录用 `--noconfirm`，否则构建报 `SAFE_DELETE_FAIL_CLOSED`。
-> ⚠️ 复杂/原生包（asyncpg/lark_oapi/qdrant/cryptography/playwright 等）必须用 `--collect-all`（而非手写 `collect_all` 拼 TOC，会踩 `.pyx` 冲突 / `dist-info` 目录 / 3-tuple 格式坑）。
+> ⚠️ **构建坑（必看）**：本机安全删除会拦截 `rm -rf` / PyInstaller `--clean` / `--noconfirm` 对已存在目录的清理。务必先用 PowerShell `Remove-Item -Recurse -Force` 清掉 build/dist，再不带 `--clean` 构建，否则报 `SAFE_DELETE_FAIL_CLOSED`。
+> ⚠️ 复杂/原生包（chromadb/lark_oapi/cryptography/playwright 等）必须用 `--collect-all`（而非手写 `collect_all` 拼 TOC，会踩 `.pyx` 冲突 / `dist-info` 目录 / 3-tuple 格式坑）。
 > ⚠️ **`.venv/Scripts/pyinstaller.exe` 在本机已损坏**（直接运行 `exit=1` 且无任何输出）——**必须用 `.venv/Scripts/python.exe -m PyInstaller`**，不要直接调 `pyinstaller`/`pyinstaller.exe`。
-> ⚠️ 传给 PyInstaller 的 `--workpath`/`--distpath` 若写成 `D:/tmp/...` 形式，Windows 下的 Python 会把它解析成 `D:\d\tmp\...`（多一层 `d\`）；产物实际落在 `D:\d\tmp\...`，取产物时按该路径即可。
-> 🔒 **绝不要 `--add-data "config;config"`**：冻结态真实配置读的是 `APP_DIR/config/config.json`（exe 同级），`_internal/config` 永远读不到；但打进去会把**本机的 `secret_key` 内嵌进每一份分发产物**（解包 `_internal/config/config.json` 即得内部鉴权密钥）。2026-08-04 已从两个 spec 移除；历史产物 `release/goofish-server/` `dist/goofish-server/` 曾泄露过，重打包后作废。
+> 🔒 **绝不要 `--add-data "config;config"`**：冻结态真实配置读的是 `APP_DIR/config/config.json`（exe 同级），`_internal/config` 永远读不到；但打进去会把**本机的 `secret_key` 内嵌进每一份分发产物**（解包 `_internal/config/config.json` 即得内部鉴权密钥）。spec 中已移除 `config` 数据项；缺配置时 `load_config()` 自动生成 + 随机 `secret_key`。
 
 ### 运行（发布产物）
 产物在 `release/GoofishMasterDesktop/`（含 `GoofishMasterDesktop.exe` + `_internal/`）：
@@ -323,7 +324,7 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 2. **本地后端已内置**：P1 三项数据库已全部改为进程内嵌入式（SQLite/fakeredis/Chroma），默认全开，无需外部服务；`enabled=false` 才降级。
 3. **体积**：onedir 含全部依赖（含 chromadb），目录约数百 MB~1GB；可后续换 `--onefile` 瘦身。
 4. **未签名**：发布前需代码签名（否则 Windows SmartScreen 拦截）。
-5. **安装包**：InnoSetup/NSIS 封装、自动更新未做。
+5. **安装包**：✅ 已完成（Inno Setup 6，默认装 D 盘、可改路径、可改端口）。
 
 ---
 
@@ -336,12 +337,12 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 | spider 起不来 | 缺 Playwright Chromium | `playwright install chromium` |
 | AI 分析失败 | 未配 AI Key / 代理不通 | 填 `config.json` 的 `ai.*` + `ai.proxy_url` |
 | 飞书收不到消息 | 未配 App / 长连接未建立 | 填 `feishu.app_id/app_secret`，看日志 |
-| 端口被占 | 与原 Docker 冲突或重复启动 | 确认用 8911–8914；`stop` 后再 `start` |
+| 端口被占 | 本机其他进程占用 | 改 `config.json` 的 `ports.*` 或安装时填新端口；`stop` 后再 `start` |
 | 双击 exe 无窗口 | 缺 WebView2 Runtime | 装 Microsoft Edge WebView2 Runtime（Win10/11 一般自带） |
 | GUI 报错但 start 正常 | pywebview 平台/依赖问题 | 看 `data/logs/launcher.log`；确认 WebView2 可用 |
 | 双击 exe 闪退（无窗口无提示） | GUI 线程崩 / WebView2 缺失 / 依赖 | 看 `data/logs/desktop-crash.log` + 错误框；`start` 若正常则问题在 GUI/WebView2（`--windowed` 已去黑框） |
 | 登陆后顶部弹「服务异常：qdrant — 请检查服务状态」 | 旧版 `/api/system/overview` 写死探测 `http://qdrant:6333/healthz`（Docker 名），桌面版无该容器必失败→误判。已修复：`backends.*.enabled=false` 标 `disabled`（可选未启用，非异常）；P1 后向量库改为进程内 Chroma，`enabled=true` 直接判 `running`，不再探测外部端口 | 升级到含此修复的 exe 即可；P1 默认 `qdrant.enabled=true`，RAG 知识库自动启用（需配 embedding key） |
-| overview 三项基础设施全 `disabled` + `system_status=degraded`（但 config 里 `enabled=true`） | feishu-agent/main.py 顶部 try 块用了 `sys.path.insert` 却**没 `import sys`** → NameError 被静默吞 → `cfg_mod=None` → overview 读不到配置。P1 冒烟时查实（2026-08-04 修：import 行补 `sys`）。此 bug 自桌面 fork 起就存在，旧版因 config 本就 enabled=false 而隐形 | 源码已修；`_internal/services/*/main.py` 是**数据文件**（非 PYZ 编译），单文件 cp 同步即等效重打包，无需整包重建 |
+| overview 三项基础设施全 `disabled` + `system_status=degraded`（但 config 里 `enabled=true`） | feishu-agent/main.py 顶部 try 块用了 `sys.path.insert` 却**没 `import sys`** → NameError 被静默吞 → `cfg_mod=None` → overview 读不到配置。2026-08-04 修：import 行补 `sys`。旧版因 config 本就 enabled=false 而隐形 | 源码已修；`_internal/services/*/main.py` 是**数据文件**（非 PYZ 编译），单文件 cp 同步即等效重打包，无需整包重建 |
 
 ---
 
@@ -354,23 +355,19 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 - `GoofishMasterDesktop.exe start`：无界面服务端（行为同 §11）。
 - `stop` / `restart` / `status`：不变。
 
-### 构建命令（已验证，单 exe 含 GUI）
+### 构建命令（历史内联参考，规范方式用 spec）
 ```bash
 cd D:\WorkBuddy\GoofishMasterDesktop
-.venv\Scripts\python.exe -m PyInstaller --name GoofishMasterDesktop --onedir --windowed --noconfirm --clean ^
-  --add-data "common;common" --add-data "config;config" --add-data "services;services" --add-data "knowledge-base;knowledge-base" ^
-  --add-data "desktop/ui;desktop/ui" ^
-  --exclude-module tkinter --exclude-module PyQt5 --exclude-module PyQt6 --exclude-module PySide2 --exclude-module PySide6 --exclude-module PyQt4 --exclude-module PySide ^
-  --collect-all lark_oapi --collect-all chromadb --collect-all fakeredis --collect-all aiosqlite --collect-all openai --collect-all playwright --collect-all fastapi --collect-all uvicorn --collect-all redis --collect-all httpx --collect-all websockets --collect-all segno --collect-all pyotp --collect-all cryptography --collect-all yaml --collect-all aiofiles --collect-all requests --collect-all python_socks --collect-all pydantic_settings --collect-all PIL --collect-all webview --collect-all pystray ^
-  --hidden-import json --hidden-import os --hidden-import secrets --hidden-import sys ^
-  --hidden-import desktop.api --hidden-import desktop.app --hidden-import webview.platforms.edgechromium ^
-  --workpath <全新时间戳路径> --distpath <全新时间戳路径> launcher.py
+# 规范方式（推荐）：
+# 先 PowerShell 清 build/dist，再：
+# .venv\Scripts\python.exe -m PyInstaller GoofishMasterDesktop.spec --noconfirm
+# 产物在 dist/GoofishMasterDesktop/
 ```
+> spec 已含 `--collect-all chromadb/fakeredis/aiosqlite`（替代已移除的 qdrant_client/asyncpg）+ `--collect-all webview/pystray`（GUI）+ `datas=[('desktop','desktop'),...]`（desktop 数据文件化）。
 
-### 关键改动（相对 §11 无界面版）
+### 关键改动（GUI 版相对无界面版）
 - 移除 `--exclude-module webview` / `--exclude-module pystray`，改为 `--collect-all webview --collect-all pystray`（GUI + 托盘依赖）。
-- 新增 `--add-data "desktop/ui;desktop/ui"`（控制台 HTML/CSS/JS，冻结后位于 `_MEIPASS/desktop/ui/`）。
-- 新增 `--hidden-import desktop.api --hidden-import desktop.app`，强制打包控制台桥接与壳（`desktop` 模式在 `launcher.main` 内惰性导入，分析期不会自动收集）。
+- `desktop/` 整目录作为数据文件（`datas=[('desktop','desktop')]`），冻结后位于 `_MEIPASS/desktop/`；改 api.py/app.py 单文件 cp 即生效，不用重打包。
 - 入口仍是 `launcher.py`；`launcher.main` 增加 `desktop` action（冻结态默认即 `desktop`，双击开窗口；非冻结默认 `start`）。
 
 ### 路径与依赖
