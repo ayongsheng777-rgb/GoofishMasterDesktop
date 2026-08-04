@@ -11,6 +11,7 @@ GoofishMasterDesktop 启动编排器
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import signal
@@ -50,6 +51,74 @@ PROCS: dict[str, subprocess.Popen] = {}
 _RUNNING = True
 
 
+# ---------------------------------------------------------------------------
+# 桌面运行前置依赖检测（WebView2 Runtime / 打包的 Playwright Chromium）
+# ---------------------------------------------------------------------------
+def _webview2_installed() -> bool:
+    """检测 Microsoft Edge WebView2 Runtime 是否已安装（固定注册表 GUID）。"""
+    try:
+        import winreg
+    except Exception:
+        return True  # 非 Windows / 无法检测 → 假定可用（避免误报）
+    guid = "{F3017226-FE2A-4295-8BDF-00C3A9A08C11}"
+    for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for base in (r"SOFTWARE\Microsoft\EdgeUpdate\Clients",
+                     r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients"):
+            try:
+                with winreg.OpenKey(root, base + "\\" + guid):
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _bundled_browsers_dir() -> Path:
+    """打包产物中随附的 Playwright Chromium 目录（安装时落盘到 app 同级）。"""
+    env_dir = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
+    if env_dir:
+        return Path(env_dir).resolve()
+    if getattr(sys, "frozen", False):
+        # 冻结模式：playwright-browsers 随 exe 一起落在 app 目录下（与 _internal 同级）
+        return Path(sys.executable).resolve().parent / "playwright-browsers"
+    return (ROOT / "playwright-browsers").resolve()
+
+
+def _chromium_installed() -> bool:
+    """检测打包的 Playwright Chromium 是否存在于随附浏览器目录。"""
+    bdir = _bundled_browsers_dir()
+    if not bdir.exists():
+        return False
+    # Playwright 浏览器目录形如 chromium-<revision> / chromium_headless_shell-<revision>
+    found = any(p.name.startswith("chromium") for p in bdir.iterdir() if p.is_dir())
+    return found
+
+
+def check_prerequisites() -> dict:
+    """返回前置依赖检测结果（供桌面控制台 / preflight 命令使用）。"""
+    webview2 = _webview2_installed()
+    chromium = _chromium_installed()
+    return {
+        "webview2_installed": webview2,
+        "webview2_message": (
+            "已安装" if webview2 else
+            "未检测到 WebView2 Runtime，桌面窗口无法打开（安装包会自动安装）"
+        ),
+        "chromium_installed": chromium,
+        "chromium_message": (
+            "已随附 Chromium" if chromium else
+            "未找到随附的 Chromium，采集服务将使用系统 Chrome/Edge（需另行安装）"
+        ),
+        "all_ok": webview2 and chromium,
+    }
+
+
+def _app_dir() -> Path:
+    """配置/数据落盘根目录（exe 同级；开发模式为项目根）。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return ROOT
+
+
 def _data_dir(sub: str) -> str:
     d = cfg_mod.APP_DIR / "data" / sub
     d.mkdir(parents=True, exist_ok=True)
@@ -76,6 +145,8 @@ def build_env(name: str) -> dict:
     e = _safe_env()
     e["PYTHONUNBUFFERED"] = "1"
     e["GOOFISH_SECRET_KEY"] = CFG.get("secret_key", "")
+    # 指向打包随附的 Chromium（安装时落盘到 app 同级 playwright-browsers）
+    e["PLAYWRIGHT_BROWSERS_PATH"] = str(_bundled_browsers_dir())
     # 本地后端连接串：仅在对应后端 enabled 时注入真实地址；
     # 未启用则注入空串 + 显式 *_ENABLED=false，让各服务跳过连接尝试、
     # 干净降级（不再向死地址重试/告警），overview 也据此判 degraded。
@@ -132,6 +203,10 @@ def build_env(name: str) -> dict:
         e["FEISHU_AGENT_URL"] = urls["feishu_agent"]
         e["RUN_HEADLESS"] = "true"
         e["RUNNING_IN_DOCKER"] = "false"
+        # 桌面端优先使用随附的 Playwright Chromium（而非系统 Chrome/Edge），
+        # 保证离线环境也能采集；scraper 读取该变量决定是否走 bundled 通道。
+        if _chromium_installed():
+            e["GOOFISH_USE_BUNDLED_CHROMIUM"] = "true"
 
     return e
 
@@ -308,7 +383,7 @@ def main_start_no_block() -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="GoofishMasterDesktop 启动器")
-    parser.add_argument("action", choices=["start", "stop", "restart", "status", "desktop"],
+    parser.add_argument("action", choices=["start", "stop", "restart", "status", "desktop", "preflight"],
                         nargs="?", default="desktop" if getattr(sys, "frozen", False) else "start")
     parser.add_argument("--service", default=None,
                         help="冻结模式下以独立进程运行指定服务（内部使用）")
@@ -317,6 +392,11 @@ def main():
     # 冻结模式：子进程运行单个服务
     if args.service:
         run_service_mode(args.service)
+        return
+
+    # 前置依赖检测（JSON 输出，供控制台/脚本读取）
+    if args.action == "preflight":
+        print(json.dumps(check_prerequisites(), ensure_ascii=False))
         return
 
     # 冻结模式（无控制台）：把 stdout/stderr 重定向到日志文件，避免丢失现场

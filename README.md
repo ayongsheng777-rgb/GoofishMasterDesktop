@@ -70,8 +70,24 @@ feishu-agent        ai-router     agent-pipeline  spider-service
 5. 勾选「创建桌面快捷方式」
 6. 安装完成 → 桌面双击 `GoofishMasterDesktop` 即用
 
-> 安装包已内置全部依赖（含 chromadb / fakeredis / aiosqlite），无需任何额外安装。
-> Windows 10/11 一般自带 WebView2 Runtime；纯离线机器需先装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+> **安装包已内置全部运行依赖**：
+> - 全部 Python 依赖（chromadb / fakeredis / aiosqlite 等），无需安装 Python
+> - **Playwright Chromium（rev 1234）随安装包分发**，落在 `{app}\playwright-browsers`，采集服务离线即可用，无需系统安装 Chrome/Edge
+> - 若目标机缺失 **WebView2 Runtime**，安装包会在安装末尾**自动静默安装**（需联网；Windows 10/11 一般已自带，纯离线机需提前装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)）
+
+### 前置依赖检测
+
+桌面控制台顶部新增「环境检测」卡片，实时显示两项前置依赖状态：
+
+- **WebView2 Runtime**：桌面窗口渲染依赖（缺失时窗口打不开，但后端仍可在浏览器管理）
+- **随附 Chromium**：采集服务离线采集依赖（缺失时退化为使用系统 Chrome/Edge）
+
+也可用命令行自检：
+
+```bash
+GoofishMasterDesktop.exe preflight
+# 输出 JSON：{"webview2_installed": true, "chromium_installed": true, "all_ok": true, ...}
+```
 
 ### 方式二：源码运行（开发者）
 
@@ -84,7 +100,7 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 
-# 采集服务需要 Playwright Chromium
+# 采集服务需要 Playwright Chromium（须与打包驱动同修订号 1234）
 playwright install chromium
 
 # 启动全部服务（命令行模式）
@@ -208,20 +224,21 @@ GoofishMasterDesktop.exe restart <name>  # 重启指定服务
 
 ```
 GoofishMasterDesktop/
-├── launcher.py              # 启动编排器（拉起 4 服务 / 健康检查 / 看门狗）
+├── launcher.py              # 启动编排器（拉起 4 服务 / 健康检查 / 看门狗 / 前置依赖检测）
 ├── desktop/                 # 桌面控制台（pywebview + 系统托盘）
 │   ├── app.py               # 桌面壳
-│   ├── api.py               # JS 桥接 API
-│   └── ui/                  # 控制台前端（HTML/CSS/JS）
+│   ├── api.py               # JS 桥接 API（含 check_prerequisites）
+│   └── ui/                  # 控制台前端（HTML/CSS/JS，含环境检测卡片）
 ├── common/config.py         # 配置中心
 ├── services/                # 4 个微服务
 │   ├── feishu-agent/        # 飞书长连接 + WebUI
 │   ├── ai-router/           # 多模型路由 + RAG
 │   ├── agent-pipeline/      # 编排 + 决策打分
-│   └── spider-service/      # 闲鱼采集
+│   └── spider-service/      # 闲鱼采集（优先用随附 Chromium）
 ├── knowledge-base/          # RAG 知识库
-├── GoofishMasterDesktop.spec      # PyInstaller 打包配置
-├── GoofishMasterDesktop.iss       # Inno Setup 安装包脚本
+├── build-assets/            # 安装包构建资源（WebView2 引导安装器）
+├── GoofishMasterDesktop.spec      # PyInstaller 打包配置（已含 app.ico）
+├── GoofishMasterDesktop.iss       # Inno Setup 安装包脚本（含 WebView2 自动装 + 随附 Chromium）
 ├── config.example.json      # 配置示例
 └── requirements.txt         # Python 依赖
 ```
@@ -230,10 +247,10 @@ GoofishMasterDesktop/
 
 | 现象 | 处理 |
 |------|------|
-| 双击 exe 无窗口 | 装 Microsoft Edge WebView2 Runtime |
+| 双击 exe 无窗口 | 缺少 WebView2 Runtime；安装包会自动装，联网失败则手动装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
 | 双击闪退 | 看 `data/logs/desktop-crash.log`；命令行 `GoofishMasterDesktop.exe start` 确认服务端是否能起 |
 | 8911 打不开 WebUI | 看 `data/logs/feishu-agent.log`；确认服务已启动 |
-| 采集失败 | `playwright install chromium`（开发模式）；安装包版需额外分发浏览器 |
+| 采集失败 | 安装包版已随附 Chromium，检查「环境检测」卡片 Chromium 状态；开发模式需 `playwright install chromium` |
 | AI 分析失败 | 检查 `config.json` 的 `ai.deepseek_api_key`；境外模型需配 `ai.proxy_url` |
 | 飞书收不到消息 | 检查 `feishu.app_id/app_secret`；看日志长连接是否建立 |
 | 端口被占 | 改 `config.json` 的 `ports.*` 或安装时填新端口 |

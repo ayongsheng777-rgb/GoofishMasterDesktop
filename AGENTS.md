@@ -320,11 +320,12 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 - 规范产物为 `--windowed`（无控制台窗口）：冻结态下 launcher 把 stdout/stderr 重定向到 `APP_DIR/data/logs/launcher.log`，各服务日志落 `data/logs/<svc>.log`，日志已落盘不受影响。要排障临时看控制台可临时改 spec 的 `console=True` 重建。
 
 ### 可执行版已知限制
-1. **Playwright Chromium 未随包**：spider 启动正常但真实采集需目标机 `playwright install chromium`（或将来把浏览器二进制随安装包分发）。
+1. **Playwright Chromium 已随包**：安装包内含 `playwright-browsers/chromium-1234` + `chromium_headless_shell-1234`（与打包 Playwright 驱动同修订号 1234），安装时随附到 `{app}\playwright-browsers`。launcher 向 spider 注入 `PLAYWRIGHT_BROWSERS_PATH`，桌面端优先走 bundled Chromium（`GOOFISH_USE_BUNDLED_CHROMIUM=true`），**离线也能采集**，不再依赖系统 Chrome/Edge。
 2. **本地后端已内置**：P1 三项数据库已全部改为进程内嵌入式（SQLite/fakeredis/Chroma），默认全开，无需外部服务；`enabled=false` 才降级。
-3. **体积**：onedir 含全部依赖（含 chromadb），目录约数百 MB~1GB；可后续换 `--onefile` 瘦身。
+3. **体积**：onedir 含全部依赖（含 chromadb + 随附 Chromium ~300MB），目录约 1GB+；可后续换 `--onefile` 瘦身。
 4. **未签名**：发布前需代码签名（否则 Windows SmartScreen 拦截）。
-5. **安装包**：✅ 已完成（Inno Setup 6，默认装 D 盘、可改路径、可改端口）。
+5. **安装包**：✅ 已完成（Inno Setup 6，默认装 D 盘、可改路径、可改端口；含 WebView2 自动安装 + 随附 Chromium）。
+6. **前置依赖检测**：launcher 新增 `preflight` 子命令 + `check_prerequisites()`，桌面控制台「环境检测」卡片显示 WebView2 / Chromium 就绪状态；安装包在 `ssPostInstall` 阶段若缺 WebView2 会自动静默安装（需联网）。
 
 ---
 
@@ -334,7 +335,7 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 |------|------|------|
 | 8911 打不开面板 | feishu-agent 未就绪 | `launcher.py status` + 看 `data/logs/feishu-agent.log` |
 | 服务 health=…(未就绪) | 后端未启动（预期降级） | 配 `backends` 或忽略（非 DB 功能可用） |
-| spider 起不来 | 缺 Playwright Chromium | `playwright install chromium` |
+| spider 起不来 | 缺 Playwright Chromium | 安装包已随附 Chromium（`{app}\playwright-browsers`）；开发模式才需 `playwright install chromium` |
 | AI 分析失败 | 未配 AI Key / 代理不通 | 填 `config.json` 的 `ai.*` + `ai.proxy_url` |
 | 飞书收不到消息 | 未配 App / 长连接未建立 | 填 `feishu.app_id/app_secret`，看日志 |
 | 端口被占 | 本机其他进程占用 | 改 `config.json` 的 `ports.*` 或安装时填新端口；`stop` 后再 `start` |

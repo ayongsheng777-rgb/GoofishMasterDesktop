@@ -44,8 +44,12 @@ Name: "desktopicon"; Description: "创建桌面快捷方式"; GroupDescription: 
 Source: "release\GoofishMasterDesktop\GoofishMasterDesktop.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; _internal 全部依赖（数据文件方式打包，可单文件替换）
 Source: "release\GoofishMasterDesktop\_internal\*"; DestDir: "{app}\_internal"; Flags: ignoreversion recursesubdirs createallsubdirs
+; 随附的 Playwright Chromium（采集服务离线可用，无需系统 Chrome/Edge）
+Source: "release\GoofishMasterDesktop\playwright-browsers\*"; DestDir: "{app}\playwright-browsers"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; config.example.json 供参考
 Source: "config.example.json"; DestDir: "{app}"; Flags: ignoreversion
+; WebView2 Runtime 引导安装器（Evergreen Bootstrapper，约 1.5MB，联网安装）
+Source: "build-assets\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: ignoreversion dontcopy
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -62,6 +66,17 @@ Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExeName} /F /T"; Flags: r
 [Code]
 var
   PortPage: TInputQueryWizardPage;
+
+function IsWebView2Installed: Boolean;
+var
+  WV2RegKey: String;
+begin
+  { 检测 WebView2 Runtime 固定注册表 GUID（HKLM / HKCU 均可） }
+  WV2RegKey := '{F3017226-FE2A-4295-8BDF-00C3A9A08C11}';
+  Result := RegKeyExists(HKLM, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WV2RegKey)
+         or RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\' + WV2RegKey)
+         or RegKeyExists(HKCU, 'SOFTWARE\Microsoft\EdgeUpdate\Clients\' + WV2RegKey);
+end;
 
 procedure InitializeWizard;
 begin
@@ -97,9 +112,29 @@ var
   ConfigDir: String;
   Content: String;
   P1, P2, P3, P4: Integer;
+  WebView2Path: String;
+  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin
+    { 若未安装 WebView2 Runtime，调用引导安装器（需联网；失败仅提示不阻断） }
+    if not IsWebView2Installed then
+    begin
+      WebView2Path := ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe');
+      if FileExists(WebView2Path) then
+      begin
+        { /silent 静默安装 Evergreen 运行时；非阻塞等待完成 }
+        if not Exec(WebView2Path, '/silent /install', '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+          MsgBox('WebView2 Runtime 安装器启动失败。' + #13#10 +
+                 '桌面窗口需要它才能打开，请联网后手动安装：' + #13#10 +
+                 'https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/', mbInformation, MB_OK);
+      end
+      else
+        MsgBox('未找到 WebView2 安装器，且系统未安装 WebView2 Runtime。' + #13#10 +
+               '桌面窗口需要它才能打开，请联网后手动安装：' + #13#10 +
+               'https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/', mbInformation, MB_OK);
+    end;
+
     ConfigDir := ExpandConstant('{app}\config');
     ConfigPath := ConfigDir + '\config.json';
 

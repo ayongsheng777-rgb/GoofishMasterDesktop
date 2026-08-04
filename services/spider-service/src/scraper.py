@@ -92,6 +92,11 @@ def _resolve_browser_channel() -> str:
             )
             EDGE_DOCKER_WARNING_PRINTED = True
         return "chromium"
+    # 桌面端：若随附了 Playwright Chromium（GOOFISH_USE_BUNDLED_CHROMIUM=true），
+    # 则走 bundled 通道（默认 channel 为空 = 使用 PLAYWRIGHT_BROWSERS_PATH 下的 Chromium），
+    # 保证离线环境也能采集，无需系统安装 Chrome/Edge。
+    if os.getenv("GOOFISH_USE_BUNDLED_CHROMIUM", "false").lower() == "true":
+        return ""
     return "msedge" if LOGIN_IS_EDGE else "chrome"
 
 

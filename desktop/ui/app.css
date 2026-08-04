@@ -118,6 +118,22 @@ body {
 .svc-meta .pid { font-size: 12px; color: var(--text-muted); font-family: "JetBrains Mono","Consolas",monospace; }
 .svc-foot { display: flex; gap: 8px; }
 
+/* 环境检测 */
+.preflight-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+.env-item {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 14px 16px; box-shadow: var(--shadow);
+}
+.env-head { display: flex; align-items: center; gap: 9px; margin-bottom: 8px; }
+.env-label { font-size: 14px; font-weight: 700; }
+.env-tag {
+  margin-left: auto; font-size: 12px; font-weight: 600;
+  padding: 2px 9px; border-radius: 999px;
+}
+.env-ok .env-tag { background: var(--green-bg); color: var(--green); }
+.env-no .env-tag { background: var(--amber-bg); color: var(--amber); }
+.env-msg { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
 /* 日志 */
 .log-controls { display: flex; align-items: center; gap: 10px; }
 .select {

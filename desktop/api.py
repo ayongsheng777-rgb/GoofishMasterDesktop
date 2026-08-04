@@ -94,6 +94,10 @@ class Api:
     def get_config(self) -> Dict[str, Any]:
         return _config()
 
+    def check_prerequisites(self) -> Dict[str, Any]:
+        """返回 WebView2 Runtime 与随附 Chromium 的检测结果。"""
+        return launcher.check_prerequisites()
+
     def open_data_dir(self) -> None:
         try:
             import os

@@ -134,6 +134,34 @@ function refreshConfig() {
   api.get_config().then(renderConfig).catch((e) => console.error(e));
 }
 
+// ---------- 环境检测 ----------
+function renderPreflight(p) {
+  const box = el("preflightBox");
+  if (!box) return;
+  const items = [
+    { label: "WebView2 Runtime", ok: p.webview2_installed, msg: p.webview2_message },
+    { label: "随附 Chromium", ok: p.chromium_installed, msg: p.chromium_message },
+  ];
+  box.innerHTML = "";
+  items.forEach((it) => {
+    const d = document.createElement("div");
+    d.className = "env-item " + (it.ok ? "env-ok" : "env-no");
+    d.innerHTML = `
+      <div class="env-head">
+        <span class="dot ${it.ok ? "dot-ok" : "dot-bad"}"></span>
+        <span class="env-label">${it.label}</span>
+        <span class="env-tag">${it.ok ? "已就绪" : "缺失"}</span>
+      </div>
+      <div class="env-msg">${it.msg}</div>`;
+    box.appendChild(d);
+  });
+}
+
+function refreshPreflight() {
+  if (!api) return;
+  api.check_prerequisites().then(renderPreflight).catch((e) => console.error(e));
+}
+
 // ---------- 事件绑定 ----------
 function bindEvents() {
   el("toggleBtn").addEventListener("click", () => {
@@ -157,6 +185,7 @@ whenReady(() => {
   refreshStatus();
   refreshLog();
   refreshConfig();
+  refreshPreflight();
 
   statusTimer = setInterval(() => {
     refreshStatus();
