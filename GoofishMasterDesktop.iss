@@ -48,13 +48,13 @@ Source: "release\GoofishMasterDesktop\_internal\*"; DestDir: "{app}\_internal"; 
 Source: "release\GoofishMasterDesktop\playwright-browsers\*"; DestDir: "{app}\playwright-browsers"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; config.example.json 供参考
 Source: "config.example.json"; DestDir: "{app}"; Flags: ignoreversion
-; WebView2 Runtime 引导安装器（Evergreen Bootstrapper，约 1.5MB，联网安装）
-Source: "build-assets\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: ignoreversion dontcopy
+; WebView2 Runtime 离线完整安装器（Evergreen Standalone Offline Installer，约 200MB，安装时无需联网）
+Source: "build-assets\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: ignoreversion dontcopy
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "立即启动 {#MyAppName}"; Flags: postinstall nowait skipifsilent
@@ -117,21 +117,25 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    { 若未安装 WebView2 Runtime，调用引导安装器（需联网；失败仅提示不阻断） }
+    { 若未安装 WebView2 Runtime，调用离线完整安装器（已随包打包，无需联网） }
     if not IsWebView2Installed then
     begin
-      WebView2Path := ExpandConstant('{tmp}\MicrosoftEdgeWebview2Setup.exe');
+      WebView2Path := ExpandConstant('{tmp}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe');
       if FileExists(WebView2Path) then
       begin
-        { /silent 静默安装 Evergreen 运行时；非阻塞等待完成 }
-        if not Exec(WebView2Path, '/silent /install', '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
-          MsgBox('WebView2 Runtime 安装器启动失败。' + #13#10 +
-                 '桌面窗口需要它才能打开，请联网后手动安装：' + #13#10 +
-                 'https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/', mbInformation, MB_OK);
+        { 离线安装器会写入 Program Files / HKLM，必须以管理员身份运行，
+          故用 ShellExec('runas') 请求提权；用户拒绝安装仍不阻断主程序安装 }
+        if not ShellExec('runas', WebView2Path, '/silent /install', '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
+          MsgBox('WebView2 Runtime 离线安装器启动失败（可能需要管理员权限）。' + #13#10 +
+                 '桌面窗口需要它才能打开，请手动以管理员身份安装 build-assets 中的安装器，' + #13#10 +
+                 '或从 https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/ 下载。', mbInformation, MB_OK)
+        else if ResultCode <> 0 then
+          MsgBox('WebView2 Runtime 安装返回非 0 状态码：' + IntToStr(ResultCode) + '。' + #13#10 +
+                 '桌面窗口需要它才能打开，请检查后手动安装 WebView2 Runtime。', mbInformation, MB_OK);
       end
       else
-        MsgBox('未找到 WebView2 安装器，且系统未安装 WebView2 Runtime。' + #13#10 +
-               '桌面窗口需要它才能打开，请联网后手动安装：' + #13#10 +
+        MsgBox('未找到 WebView2 离线安装器，且系统未安装 WebView2 Runtime。' + #13#10 +
+               '桌面窗口需要它才能打开，请手动安装 WebView2 Runtime：' + #13#10 +
                'https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/', mbInformation, MB_OK);
     end;
 

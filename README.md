@@ -73,7 +73,7 @@ feishu-agent        ai-router     agent-pipeline  spider-service
 > **安装包已内置全部运行依赖**：
 > - 全部 Python 依赖（chromadb / fakeredis / aiosqlite 等），无需安装 Python
 > - **Playwright Chromium（rev 1234）随安装包分发**，落在 `{app}\playwright-browsers`，采集服务离线即可用，无需系统安装 Chrome/Edge
-> - 若目标机缺失 **WebView2 Runtime**，安装包会在安装末尾**自动静默安装**（需联网；Windows 10/11 一般已自带，纯离线机需提前装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)）
+> - 若目标机缺失 **WebView2 Runtime**，安装包会在安装末尾**自动调用随附的离线完整安装器静默安装**（**无需联网**；该安装器约 200MB，已随安装包打包；Windows 10/11 一般已自带，纯离线机也能装）
 
 ### 前置依赖检测
 
@@ -236,7 +236,8 @@ GoofishMasterDesktop/
 │   ├── agent-pipeline/      # 编排 + 决策打分
 │   └── spider-service/      # 闲鱼采集（优先用随附 Chromium）
 ├── knowledge-base/          # RAG 知识库
-├── build-assets/            # 安装包构建资源（WebView2 引导安装器）
+├── build-assets/            # 安装包构建资源（WebView2 离线完整安装器，约 200MB，从官方下载，不入版本库）
+├── sign.ps1                 # 代码签名脚本（可选增强，默认跳过；需真实 CA 证书）
 ├── GoofishMasterDesktop.spec      # PyInstaller 打包配置（已含 app.ico）
 ├── GoofishMasterDesktop.iss       # Inno Setup 安装包脚本（含 WebView2 自动装 + 随附 Chromium）
 ├── config.example.json      # 配置示例
@@ -247,7 +248,7 @@ GoofishMasterDesktop/
 
 | 现象 | 处理 |
 |------|------|
-| 双击 exe 无窗口 | 缺少 WebView2 Runtime；安装包会自动装，联网失败则手动装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
+| 双击 exe 无窗口 | 缺少 WebView2 Runtime；安装包会自动调用随附的离线安装器静默安装（无需联网）；若 UAC 被拒则按提示手动装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
 | 双击闪退 | 看 `data/logs/desktop-crash.log`；命令行 `GoofishMasterDesktop.exe start` 确认服务端是否能起 |
 | 8911 打不开 WebUI | 看 `data/logs/feishu-agent.log`；确认服务已启动 |
 | 采集失败 | 安装包版已随附 Chromium，检查「环境检测」卡片 Chromium 状态；开发模式需 `playwright install chromium` |

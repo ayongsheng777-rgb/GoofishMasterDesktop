@@ -200,7 +200,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 2. **完整 DB 能力**：P1 已默认全开（进程内 SQLite/fakeredis/Chroma），无需外部二进制；`backends.*.enabled=false` 才降级。
 3. **桌面 GUI 实测**：pywebview 需在 Windows 图形环境跑（无头环境自动跳过只启后端）。
 4. **打包成 .exe**：✅ 已完成（PyInstaller onedir，详见 §11/§13）。**安装包**：✅ 已完成（Inno Setup 6，`GoofishMasterDesktop.iss`，产物 `installer/GoofishMasterDesktop-Setup-1.0.0.exe`，详见 README.md）。
-5. **安全**：`secret_key` 明文存 `config.json`；未做配置加密、未做代码签名（发布前需预算）。
+5. **安全**：`secret_key` 明文存 `config.json`；未做配置加密。**代码签名**：已加入可选签名脚本 `sign.ps1`（默认跳过——无真实 CA 证书时自签名对发行零信任收益，故不产出自签名）。要真正消除 SmartScreen 拦截需购买 DigiCert/Sectigo/GlobalSign 等 CA 证书后启用（见 `sign.ps1` 头部说明）。
 6. **更新通道**：自动更新 / 增量升级未实现。
 7. **✅ 发布产物已刷新**：`release/GoofishMasterDesktop/`（`GoofishMasterDesktop.exe` 30.5 MB + `_internal/`，2026-08-04 重打包，已剔除内嵌 config）。
 8. **🧹 遗留构建产物清理：✅ 已完成（2026-08-04 用户授权，逐项删除并验证）**：
@@ -323,9 +323,10 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 1. **Playwright Chromium 已随包**：安装包内含 `playwright-browsers/chromium-1234` + `chromium_headless_shell-1234`（与打包 Playwright 驱动同修订号 1234），安装时随附到 `{app}\playwright-browsers`。launcher 向 spider 注入 `PLAYWRIGHT_BROWSERS_PATH`，桌面端优先走 bundled Chromium（`GOOFISH_USE_BUNDLED_CHROMIUM=true`），**离线也能采集**，不再依赖系统 Chrome/Edge。
 2. **本地后端已内置**：P1 三项数据库已全部改为进程内嵌入式（SQLite/fakeredis/Chroma），默认全开，无需外部服务；`enabled=false` 才降级。
 3. **体积**：onedir 含全部依赖（含 chromadb + 随附 Chromium ~300MB），目录约 1GB+；可后续换 `--onefile` 瘦身。
-4. **未签名**：发布前需代码签名（否则 Windows SmartScreen 拦截）。
-5. **安装包**：✅ 已完成（Inno Setup 6，默认装 D 盘、可改路径、可改端口；含 WebView2 自动安装 + 随附 Chromium）。
-6. **前置依赖检测**：launcher 新增 `preflight` 子命令 + `check_prerequisites()`，桌面控制台「环境检测」卡片显示 WebView2 / Chromium 就绪状态；安装包在 `ssPostInstall` 阶段若缺 WebView2 会自动静默安装（需联网）。
+4. **代码签名（可选）**：已备 `sign.ps1`，默认跳过（无真实 CA 证书时不产出自签名签名）。购买 CA 证书后运行 `.\sign.ps1 -Thumbprint <指纹>` 即可签名安装包 + 主程序并带时间戳。
+5. **安装包**：✅ 已完成（Inno Setup 6，默认装 D 盘、可改路径、可改端口；**WebView2 改用随附离线完整安装器 + 随附 Chromium**）。已修复安装期 `IPersistFile::Save failed; code 0x80070005`（快捷方式由 `{commondesktop}` 改 `{userdesktop}`，不再需管理员写所有用户桌面）。
+6. **WebView2 离线安装**：安装包内嵌 **Evergreen Standalone Offline Installer（约 200MB，已校验 Microsoft 有效签名）**，落在 `build-assets/`（不入版本库，从官方下载）。`ssPostInstall` 若缺 WebView2，通过 `ShellExec('runas', ...)` 提权静默安装，**全程无需联网**。用户拒绝 UAC 仅提示，不阻断主程序安装。
+7. **前置依赖检测**：launcher 新增 `preflight` 子命令 + `check_prerequisites()`，桌面控制台「环境检测」卡片显示 WebView2 / Chromium 就绪状态；安装包在 `ssPostInstall` 阶段若缺 WebView2 会调用随附离线安装器（**无需联网**）。
 
 ---
 
@@ -374,7 +375,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 ### 路径与依赖
 - 资源定位（冻结态）：`ROOT = sys._MEIPASS`（即 `_internal/`）；UI = `_MEIPASS/desktop/ui/index.html`；托盘图标 = `_MEIPASS/services/feishu-agent/static/logo-256.png`。
 - 可写数据（配置/日志）：`APP_DIR`（exe 同级，不可写回退 `%APPDATA%/GoofishMasterDesktop`）——见 §11。
-- **宿主机依赖**：Microsoft Edge **WebView2 Runtime**（Win10/11 默认自带；纯离线目标机需先装运行时）。pywebview 默认走 EdgeChromium 平台。
+- **宿主机依赖**：Microsoft Edge **WebView2 Runtime**（Win10/11 默认自带；安装包内已随附**离线完整安装器**，纯离线目标机也能装，无需联网）。pywebview 默认走 EdgeChromium 平台。
 
 ### 崩溃诊断（打开即闪退排查）
 - 桌面入口（`desktop/app.py` 的 `run()`）已加全局异常捕获：任何崩溃都会
@@ -396,4 +397,4 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 ### 已知风险 / 限制
 - GUI 无法在无头环境验证，首次在他机运行需实测窗口渲染、托盘、WebView2 可用性。
 - exe 体积在 §11 基础上再增数十 MB（webview/pystray 依赖）。
-- 其余限制同 §11（Chromium 未随包、本地后端外部、未签名、无安装包）。
+- 其余限制同 §11（Chromium 已随包、本地后端内置、签名可选未启用）。
