@@ -267,6 +267,16 @@ GoofishMasterDesktop/
 - **Playwright**（闲鱼采集无头浏览器）
 - **Inno Setup 6**（Windows 安装包）
 
+## 支持作者
+
+> 我是一个在线下经营电脑实体店的普通店主，平时靠给客户修电脑、装机维持生计。`GoofishMasterDesktop`（闲鱼圣手桌面端）是我在工作之余，用 **WorkBuddy** 一点一点做出来的小工具，主要为了自己用着方便，也希望能帮到同样有二手商品监控需求的朋友。
+>
+> 如果你用下来觉得它确实帮到了你，帮我省了点时间，欢迎扫描下方二维码随意打赏一杯咖啡或一瓶水。金额随意，心意最重要，这份小小的支持会让我有动力继续维护、修复 Bug 和加新功能。先谢过大家！
+
+| 微信支付 | 支付宝 |
+| --- | --- |
+| ![微信收款](assets/donate-wechat.png) | ![支付宝收款](assets/donate-alipay.jpg) |
+
 ## License
 
 Private
