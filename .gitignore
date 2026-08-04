@@ -1,0 +1,19 @@
+# 运行时数据（首次启动自动生成）
+data/
+config/config.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# 构建产物
+build/
+dist/
+release/
+.build/
+build_p1.log
+*.log
+
+# 临时
+.wtest

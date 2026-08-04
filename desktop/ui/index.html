@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GoofishMasterDesktop · 桌面控制台</title>
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <svg class="brand-mark" width="40" height="40" viewBox="0 0 40 40" fill="none">
+          <defs>
+            <linearGradient id="g1" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#667EEA"/>
+              <stop offset="1" stop-color="#A78BFA"/>
+            </linearGradient>
+          </defs>
+          <rect width="40" height="40" rx="11" fill="url(#g1)"/>
+          <path d="M11 16c4-3 14-3 18 0-3 1.5-4 4-4 7 0 2-1.5 3-5 3s-5-1-5-3c0-3-1-5.5-4-7z" fill="#fff" opacity="0.95"/>
+          <circle cx="16" cy="22" r="1.6" fill="#667EEA"/>
+          <circle cx="24" cy="22" r="1.6" fill="#667EEA"/>
+        </svg>
+        <div class="brand-text">
+          <div class="brand-title">GoofishMasterDesktop</div>
+          <div class="brand-sub">桌面控制台 · 独立运行端</div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div id="summaryPill" class="pill pill-idle">服务状态读取中…</div>
+        <button id="toggleBtn" class="btn btn-primary">全部启动</button>
+      </div>
+    </header>
+
+    <!-- 主体 -->
+    <main class="main">
+      <!-- 服务状态 -->
+      <section class="section">
+        <div class="section-head">
+          <h2>服务状态</h2>
+          <span class="hint">所有服务绑定 127.0.0.1，仅本机可访问</span>
+        </div>
+        <div id="serviceGrid" class="service-grid"><!-- JS 注入 --></div>
+      </section>
+
+      <!-- 运行日志 -->
+      <section class="section">
+        <div class="section-head">
+          <h2>运行日志</h2>
+          <div class="log-controls">
+            <select id="logTarget" class="select">
+              <option value="launcher">编排器</option>
+              <option value="feishu-agent">飞书智能体</option>
+              <option value="ai-router">AI 路由</option>
+              <option value="agent-pipeline">分析编排</option>
+              <option value="spider-service">采集服务</option>
+            </select>
+            <label class="switch">
+              <input type="checkbox" id="autoLog" checked />
+              <span>自动刷新</span>
+            </label>
+            <button id="refreshLog" class="btn btn-ghost">刷新</button>
+          </div>
+        </div>
+        <pre id="logBox" class="log-box">等待日志…</pre>
+      </section>
+
+      <!-- 配置概览 -->
+      <section class="section">
+        <div class="section-head">
+          <h2>配置概览</h2>
+          <span class="hint">修改配置后需重启服务生效</span>
+        </div>
+        <div id="configBox" class="config-grid"><!-- JS 注入 --></div>
+      </section>
+    </main>
+
+    <!-- 底栏 -->
+    <footer class="footer">
+      <span class="ver">GoofishMasterDesktop · 独立桌面运行端</span>
+      <div class="footer-actions">
+        <button id="openData" class="btn btn-ghost">打开数据目录</button>
+        <button id="openFrontend" class="btn btn-ghost">打开管理后台</button>
+        <button id="aboutBtn" class="btn btn-ghost">关于</button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- 关于弹层 -->
+  <div id="aboutModal" class="modal hidden">
+    <div class="modal-card">
+      <h3>关于 GoofishMasterDesktop 桌面控制台</h3>
+      <p>飞书智能体二手商品情报系统的本地桌面运行端。四个微服务（飞书智能体 / AI 路由 / 分析编排 / 采集服务）由本程序统一编排、健康巡检并优雅关停，无需安装 Python 或外部数据库。</p>
+      <p class="muted">数据目录即配置、日志与运行状态落盘位置；AI Key 与飞书凭证请在 config.json 中填写后重启。</p>
+      <button class="btn btn-primary" onclick="document.getElementById('aboutModal').classList.add('hidden')">知道了</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

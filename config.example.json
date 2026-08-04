@@ -1,0 +1,25 @@
+{
+  "secret_key": "",
+  "ports": {
+    "feishu_agent": 8911,
+    "ai_router": 8912,
+    "agent_pipeline": 8913,
+    "spider": 8914
+  },
+  "backends": {
+    "postgres": { "enabled": false, "port": 5439, "user": "goofish", "password": "goofish_v2_secret", "db": "goofish_ai" },
+    "redis": { "enabled": false, "port": 6399 },
+    "qdrant": { "enabled": false, "port": 6339 }
+  },
+  "feishu": {
+    "app_id": "",
+    "app_secret": ""
+  },
+  "ai": {
+    "deepseek_api_key": "",
+    "gemini_api_key": "",
+    "qwen_api_key": "",
+    "proxy_url": ""
+  },
+  "data_dir": "data"
+}
