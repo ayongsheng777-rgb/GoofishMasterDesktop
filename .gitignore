@@ -13,7 +13,9 @@ dist/
 release/
 .build/
 build_p1.log
+installer/
 *.log
 
 # 临时
 .wtest
+app.ico
