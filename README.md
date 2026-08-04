@@ -277,6 +277,10 @@ GoofishMasterDesktop/
 | --- | --- |
 | ![微信收款](assets/donate-wechat.png) | ![支付宝收款](assets/donate-alipay.jpg) |
 
+## 发行说明
+
+测试版发布详情见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+
 ## License
 
 Private
