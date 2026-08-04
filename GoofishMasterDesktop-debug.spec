@@ -76,6 +76,7 @@ exe = EXE(
     a.scripts,
     exclude_binaries=True,
     name="GoofishMasterDesktop",
+    icon=str(ROOT / "app.ico"),
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

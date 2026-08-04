@@ -18,4 +18,4 @@ installer/
 
 # 临时
 .wtest
-app.ico
+# 注：app.ico 是程序图标，需要纳入版本控制（PyInstaller 打包 / Inno Setup 安装包引用）

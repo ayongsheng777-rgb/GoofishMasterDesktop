@@ -13,6 +13,24 @@
 - **多模型路由**：DeepSeek（主） / Gemini（视觉） / Qwen（备 + embedding），热切换不重启
 - **RAG 知识库**：Chroma 向量库 + 语义检索，分析时自动注入相似案例
 - **优雅降级**：后端可单独关闭，主功能不受影响；前端只对真异常弹红告警
+- **品牌化图标**：`app.ico` 已集成到 PyInstaller 打包产物与 Inno Setup 安装包，生成 exe、安装向导、桌面快捷方式均使用统一图标
+
+## 运行演示
+
+> 以下为桌面控制台在本地四服务全部健康运行时的实际界面截图（由 Playwright 渲染 `desktop/ui/index.html` + 模拟后端 API 生成）。
+
+### 控制台主界面
+
+![GoofishMasterDesktop 桌面控制台](demo/demo-console.png)
+
+- 顶栏显示品牌名与 `4/4 服务运行中` 状态
+- 服务卡片实时展示：飞书智能体、AI 路由、分析编排、采集服务的运行/健康/PID 信息
+- 运行日志区展示编排器拉取 4 个子进程成功的日志
+- 配置概览区显示端口、本地后端启用、AI Key 配置状态
+
+### 关于弹层
+
+![关于 GoofishMasterDesktop](demo/demo-about.png)
 
 ## 架构
 
