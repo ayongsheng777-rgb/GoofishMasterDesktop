@@ -19,17 +19,29 @@ from datetime import datetime, timedelta
 from typing import Any, Optional
 
 
+from datetime import timezone
+
 try:
     from zoneinfo import ZoneInfo  # py3.9+
-
-    def _load_tz(name: str):
-        return ZoneInfo(name)
-
-
 except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore[assignment]
 
-    def _load_tz(name: str):
-        return None
+
+# Windows / 精简打包(PyInstaller)环境下无系统 IANA 时区库且未安装 tzdata 时，
+# ZoneInfo("Asia/Shanghai") 会在【调用时】抛 ZoneInfoNotFoundError:
+# "No time zone found with key Asia/Shanghai"（导入 zoneinfo 本身并不报错）。
+# Asia/Shanghai 自 1991 年起无夏令时，固定 UTC+8 与之完全等价，作为兜底。
+_FIXED_CN_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
+
+
+def _load_tz(name: str):
+    """加载时区；数据缺失时回退到固定东八区(仅 Asia/Shanghai)，永不抛异常。"""
+    if ZoneInfo is None:
+        return _FIXED_CN_TZ if name == "Asia/Shanghai" else None
+    try:
+        return ZoneInfo(name)
+    except Exception:  # ZoneInfoNotFoundError 等：tzdata 未安装/未打包
+        return _FIXED_CN_TZ if name == "Asia/Shanghai" else None
 
 
 def _as_int(value: Any, default: int) -> int:

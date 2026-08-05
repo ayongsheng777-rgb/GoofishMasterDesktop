@@ -815,6 +815,28 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
 
     logger.info("Pipeline search: keyword='%s', open_id=%s", keyword, open_id)
 
+    # 闲鱼登录态预检：未登录时闲鱼返回登录墙、抓不到任何商品，
+    # 不应误导用户为"未找到符合条件的商品"。先查 spider 登录态，
+    # 未登录直接提示去「🐟 闲鱼登录」扫码，省下整轮空采集。
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            st = await client.get(f"{SPIDER_URL}/api/login/status")
+            login_info = st.json()
+        if not login_info.get("logged_in"):
+            logger.warning("Pipeline search blocked: xianyu not logged in (keyword='%s')", keyword)
+            await _save_last_search({
+                "type": "search", "keyword": keyword,
+                "time": time.strftime("%Y-%m-%d %H:%M"),
+                "status": "failed",
+            })
+            return {"success": False,
+                    "error": "尚未登录闲鱼。请先到控制台「🐟 闲鱼登录」标签扫码登录，"
+                             "再发起搜索 / 监控"}
+    except Exception as e:
+        # 登录态查询失败不阻断搜索（旧版 spider 可能无此接口 / 临时抖动），
+        # 交由后续采集环节自然失败并报错
+        logger.debug("登录态预检跳过（%r），继续走搜索链路", e)
+
     # 任务中心可见性：搜索开始立即登记 running 状态（此前只在完成时写
     # last_search，采集+分析约 10 分钟内 WebUI 完全看不到这次搜索，
     # 用户误以为任务丢了——2026-08-03 实锤）
@@ -867,6 +889,19 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
         })
         return {"success": False,
                 "error": "闲鱼触发了风控验证，请稍后再试（频繁采集容易触发）"}
+
+    # 采集本身失败（浏览器崩溃 / 异常）要如实告知，不能混同「未找到商品」
+    # ——2026-08-05 实锤：status=failed 被当 total=0 处理，用户被误导去换关键词
+    if spider_data.get("status") == "failed":
+        err = spider_data.get("error") or "采集失败（未知原因）"
+        logger.error("Spider search failed (status=failed): %s", err)
+        await _save_last_search({
+            "type": "search", "keyword": keyword,
+            "time": time.strftime("%Y-%m-%d %H:%M"),
+            "status": "failed",
+        })
+        return {"success": False,
+                "error": f"采集失败：{err}"}
 
     # 走到这 = 采集全程登录健康 → 清告警限流键（恢复后再次失效要能重新告警）
     await _clear_login_alerts()

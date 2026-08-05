@@ -85,7 +85,7 @@ GoofishMasterDesktop/
 
 1. **launcher 注入**（`build_env`）：后端 `enabled=true` 时注入 `REDIS_ENABLED=true` / `POSTGRES_ENABLED=true` / `QDRANT_ENABLED=true`；`enabled=false` 时注入 `=false`（各服务据此直接降级）。URL 类变量（REDIS_URL/DATABASE_URL/QDRANT_URL）已无实际用途，但 launcher 仍按 `name.upper()` 注入以兼容。
 2. **各服务短路跳过**（不再连死地址、不重试/退避）：
-   - `ai-router/db.py`、`agent-pipeline/db.py`：`DATABASE_ENABLED` 实际读 `POSTGRES_ENABLED`（与 launcher 注入对齐），为 false 时 `_disabled=True; return`，不建 SQLite 连接。
+   - `ai-router/db.py`、`agent-pipeline/db.py`：`DATABASE_ENABLED` 默认 `True`（桌面端固定启用内嵌 SQLite 持久化），仅当显式 `SQLITE_DISABLED=1/true` 才降级。**注意：旧实现误读 `POSTGRES_ENABLED` 当开关，而桌面 `postgres` 后端默认 `enabled=false` → `POSTGRES_ENABLED=false` → 把 SQLite 一起关掉 → 监控任务无法持久化（"监控一直无反馈"）。2026-08-05 已修正为读 `SQLITE_DISABLED`，与 `POSTGRES_ENABLED` 解耦**（见 §8.2 BUG-7）。
    - `feishu-agent/auth.py`：`_redis()` 在 `if not REDIS_ENABLED:` 时置 `_redis_client=False` 直接返回（fakeredis 内存兜底）。
    - `agent-pipeline/main.py`：`_get_redis()` 同理短路。
    - `ai-router/rag.py`：`init_rag()` 开头 `if not QDRANT_ENABLED:` → `_state={"enabled":False,"reason":"backend disabled (optional, not enabled)"}` 并 `return`。
@@ -243,10 +243,27 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 | 3 | `agent-pipeline/main.py` | `_save_last_search` 只把搜索任务元数据存进 fakeredis 的 `last_search:global`，fakeredis 进程内内存非持久化，重启即清空 → 任务中心空 | 额外落盘 `agent-pipeline/data/last_search.json`，启动时优先从磁盘恢复（fakeredis 作次级兜底） |
 | 4 | `feishu-agent/templates/index.html` | `getQRCode()` 先设 `img.src` 再把父容器 `display:none→block`，img 在隐藏容器内设 src 后取消隐藏，部分浏览器不触发重绘 → 首次不显示，需二次点击 | 改为先 `removeAttribute('src')` + 显示容器，再设 `src`；缺图显式报错 |
 | 5 | `feishu-agent/auth.py` | TOTP 验证器二维码的 issuer 写死 `AI-Goofish-V2`，扫码后验证器（Google Authenticator / 腾讯云验证器等）显示该旧名 | 抽模块常量 `APP_DISPLAY_NAME = "GoofishMasterDesktop"`，`get_totp_uri` 默认 issuer 改用它；两处调用 `generate_totp_qrcode` / `main.py:848` 不传 issuer 走默认 → 全部一致 |
+| 6 | `agent-pipeline/db.py` | `DATABASE_ENABLED` 误读 `POSTGRES_ENABLED` 当开关；桌面 `postgres` 后端默认 `enabled=false` → `POSTGRES_ENABLED=false` → **SQLite 被一起关掉** → `monitor.create_task` 抛「数据库不可用，监控任务无法持久化」→ 监控任务存不进、调度器无库 → "监控一直无反馈" | `DATABASE_ENABLED` 改为读 `SQLITE_DISABLED`（默认启用，仅 `SQLITE_DISABLED=1/true` 才降级），与 `POSTGRES_ENABLED` 解耦；桌面端固定启用内嵌 SQLite 持久化 |
+| 7 | `agent-pipeline/main.py`（`pipeline_search`）+ `feishu-agent/templates/index.html` | ① 未登录闲鱼时闲鱼返回登录墙、抓到 0 条，却被显示成"未找到符合条件的商品"，误导用户去换关键词；② `pipeline_search` 只检查 `login_expired`/`risk_control`，不检查 `status="failed"`，浏览器崩溃/采集异常也被误报为"未找到" | ① 搜索前先查 `SPIDER_URL/api/login/status`，`logged_in=False` 直接返回"尚未登录闲鱼，请到「🐟 闲鱼登录」扫码"；② 新增 `status=="failed"` 分支如实上报"采集失败：…"；③ 控制台"任务中心"副标题 Postgres→SQLite 文案修正 |
 
 **图标集成（app.ico）**：根目录 `app.ico` 升级为含 16/24/32/48/64/128/256 多尺寸标准 ICO（手动按 ICO 规范组装 PNG 帧；PIL 本机写入器只产单帧）；`GoofishMasterDesktop.spec` 的 `datas` 增加 `('app.ico','.')` 使其打进 `_internal`；`desktop/app.py` 窗口与托盘图标优先用 `app.ico`，缺失回退 `logo-256.png`。exe 图标由 spec `icon=` 指定、安装器图标由 `.iss` 的 `SetupIconFile` 指定。
 
-**验证**：`py_compile` 全过；BUG2/BUG3 功能测试 round-trip 与落盘恢复均通过；BUG1/BUG4/BUG5 经代码审查确认链路闭合。
+**验证**：`py_compile` 全过；BUG2/BUG3 功能测试 round-trip 与落盘恢复均通过；BUG1/BUG4/BUG5/BUG6/BUG7 经代码审查确认链路闭合（BUG7 的登录预检为新增防御，旧版 spider 无 `/api/login/status` 时 try/except 静默跳过不阻断）。
+
+---
+
+## 8.3 2026-08-05 后续修复（图标崩溃 + WebView2 固定版打包）
+
+| # | 位置 | 问题 | 修法 |
+|---|------|------|------|
+| 6 | `desktop/app.py` | `webview.create_window(..., icon=...)` 触发 `TypeError: got an unexpected keyword argument 'icon'` → 桌面窗口启动即崩（含 `data/logs/desktop-crash.log` 报错）。根因：本机 pywebview 版本的 `create_window` **不支持 `icon` 参数**（`Window` 类也无 `icon` 属性） | 删除 `icon=` 关键字；窗口图标由 exe 内嵌的 `app.ico`（PyInstaller spec `icon=`）提供。另修一处隐患：`app.py` 第 ~137 行用了 `Path(cand)` 但模块未导入 `Path` → 补 `from pathlib import Path`（否则修完图标后会立刻触发 `NameError`） |
+| 7 | 安装/分发 | 部分机器未预装系统 WebView2 Runtime，且 `.iss` 把离线安装器声明 `dontcopy` 却从不 `ExtractTemporaryFile`，`{tmp}` 始终无该 exe → 弹「未找到 WebView2 离线安装器」且无法打开桌面窗口 | **改为打包固定版本 WebView2 运行时（方案 B）**：从本机已装目录 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\151.0.4129.59\` 复制整个文件夹到项目 `webview2_runtime/`（含 `msedgewebview2.exe` + `EBWebView/`）；`desktop/app.py` 启动前置 `_resolve_webview2_runtime()` 设 `os.environ['WEBVIEW2_RUNTIME_PATH']` 指向它；`edgechromium.py` 原生读取该变量 → **完全不依赖系统 Runtime、免 UAC、免联网**。`WebView2Loader.dll` 由 pywebview 自带（`_internal/webview/lib/runtimes/win-x64/native/`，`edgechromium.py` 已加进 PATH），无需复制。`.iss` 新增 `Source: "webview2_runtime\*"; DestDir: "{app}\webview2_runtime"`；删除原 `ShellExec('runas',...)` 提权安装分支与 `dontcopy` 离线安装器声明；`launcher.check_prerequisites()` 把「随包固定版」也判为已就绪 |
+| 8 | `services/spider-service/src/failure_guard.py` | 搜索/监控采集时抛 `No time zone found with key Asia/Shanghai`（HTTP 200 但 `status=failed`，前端如实报「采集失败」）。根因：Windows / PyInstaller 环境**无系统 IANA 时区库**，且 venv 未装 `tzdata` → `zoneinfo.ZoneInfo("Asia/Shanghai")` 在**调用时**抛 `ZoneInfoNotFoundError`（导入 zoneinfo 不报错，调用才炸）。PyInstaller 构建日志 `WARNING: Hidden import "tzdata" not found!` 印证 | **双保险**：① 代码兜底——`_load_tz()` 改 `try/except Exception` 捕获，Asia/Shanghai 失败时回退固定东八区 `timezone(timedelta(hours=8), name="Asia/Shanghai")`（上海自 1991 起无夏令时，完全等价），**永不抛异常**；② 环境治本——`pip install tzdata`，`requirements.txt` 新增 `tzdata>=2024.1`，`GoofishMasterDesktop.spec` 的 `hiddenimports` 增加 `'tzdata'`，确保 PyInstaller 把时区数据打进 `_internal` |
+
+**注意**：
+- `webview2_runtime/` 约 500MB，**已加入 `.gitignore`**（从本机复制，不入库）；安装器随之膨胀到约 1GB。
+- 固定版运行时版本跟随本机 EdgeWebView（当前 151.0.4129.59）。换机/升级时若需更新，重新从该机 `EdgeWebView\Application\<版本>\` 复制覆盖即可。
+- **GitHub Release 上传坑**：`gh release upload` 经代理（HTTPS_PROXY）上传 500MB+ 大文件时返回 `HTTP 400 Bad Request`（疑代理干扰 `gh` 的 multipart 请求）。改用 `curl` 直传 `uploads.github.com/.../releases/<id>/assets?name=...`：显式 `Content-Type: application/octet-stream` + `-x http://127.0.0.1:1080`，实测可用。
 
 ---
 
@@ -363,6 +380,7 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 | 双击 exe 闪退（无窗口无提示） | GUI 线程崩 / WebView2 缺失 / 依赖 | 看 `data/logs/desktop-crash.log` + 错误框；`start` 若正常则问题在 GUI/WebView2（`--windowed` 已去黑框） |
 | 登陆后顶部弹「服务异常：qdrant — 请检查服务状态」 | 旧版 `/api/system/overview` 写死探测 `http://qdrant:6333/healthz`（Docker 名），桌面版无该容器必失败→误判。已修复：`backends.*.enabled=false` 标 `disabled`（可选未启用，非异常）；P1 后向量库改为进程内 Chroma，`enabled=true` 直接判 `running`，不再探测外部端口 | 升级到含此修复的 exe 即可；P1 默认 `qdrant.enabled=true`，RAG 知识库自动启用（需配 embedding key） |
 | overview 三项基础设施全 `disabled` + `system_status=degraded`（但 config 里 `enabled=true`） | feishu-agent/main.py 顶部 try 块用了 `sys.path.insert` 却**没 `import sys`** → NameError 被静默吞 → `cfg_mod=None` → overview 读不到配置。2026-08-04 修：import 行补 `sys`。旧版因 config 本就 enabled=false 而隐形 | 源码已修；`_internal/services/*/main.py` 是**数据文件**（非 PYZ 编译），单文件 cp 同步即等效重打包，无需整包重建 |
+| 搜索/监控报「采集失败：No time zone found with key Asia/Shanghai」 | Windows / PyInstaller 无系统 IANA 时区库，且 `tzdata` 未装/未打包 → `zoneinfo.ZoneInfo("Asia/Shanghai")` 调用时抛 `ZoneInfoNotFoundError`，整次采集崩 | 已修（BUG-8，见 §8.3）：`failure_guard.py` 回退固定东八区 + `tzdata` 入 `requirements.txt` 与 spec `hiddenimports`。升级到含此修复的 exe 即可；代码兜底保证即使 tzdata 缺失也不崩 |
 
 ---
 

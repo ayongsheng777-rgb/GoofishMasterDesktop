@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import ctypes
 import logging
+import os
 import sys
 import threading
 import traceback
+from pathlib import Path
 
 log = logging.getLogger("desktop")
 
@@ -61,7 +63,29 @@ def _webview2_installed() -> bool:
     return False
 
 
+def _resolve_webview2_runtime() -> "str | None":
+    """返回随包携带的固定版本 WebView2 运行时目录（含 msedgewebview2.exe）。
+
+    该目录由安装器随附到 exe 同级（webview2_runtime/），或开发态位于仓库根。
+    优先使用它可让程序完全不依赖系统 WebView2 Runtime，免 UAC、免联网。
+    原生 WebView2 加载器会直接读取环境变量 WEBVIEW2_RUNTIME_PATH。
+    """
+    try:
+        cand = Path(sys.executable).resolve().parent / "webview2_runtime"
+        if (cand / "msedgewebview2.exe").exists():
+            return str(cand)
+    except Exception:
+        pass
+    return None
+
+
 def run():
+    # 固定版本 WebView2 运行时：若随包携带 webview2_runtime/，则优先使用
+    # （原生 WebView2 加载器直接读 WEBVIEW2_RUNTIME_PATH，免系统 Runtime / 免 UAC / 免联网）
+    _rt = _resolve_webview2_runtime()
+    if _rt:
+        os.environ["WEBVIEW2_RUNTIME_PATH"] = _rt
+
     # 业务依赖延迟导入，且包在 try 内：模块级只依赖标准库，绝不因业务 import 失败而整机崩溃
     try:
         sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
@@ -98,6 +122,8 @@ def run():
         log.warning("[desktop] stage=ui_path=%s", ui_path)
 
         # 品牌图标：优先用打包进 _internal 的 app.ico（多尺寸），缺失时回退 logo-256.png
+        # 注：当前 pywebview 版本的 create_window 不支持 icon= 关键字（会 TypeError 崩溃），
+        # 窗口图标由 exe 内嵌的 app.ico（PyInstaller spec 已设）提供，无需此参数。
         icon_path = cfg_mod.ROOT / "app.ico"
 
         api = Api()
@@ -108,7 +134,6 @@ def run():
             width=1180,
             height=760,
             min_size=(900, 600),
-            icon=str(icon_path) if icon_path.exists() else None,
         )
         log.warning("[desktop] stage=window_created")
 
@@ -185,10 +210,16 @@ def run():
         msg = f"桌面窗口启动异常：\n{e}\n\n详见 data/logs/desktop-crash.log"
         # WebView2 Runtime 缺失时的友好指引
         if "webview2" in str(e).lower():
-            msg = ("未检测到 Microsoft Edge WebView2 Runtime，桌面窗口无法打开。\n\n"
-                   "请安装后重试：\n"
-                   "https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/\n\n"
-                   "（后端服务仍可后台运行，可在浏览器打开 http://127.0.0.1:8911 管理）")
+            if _rt:
+                msg = ("WebView2 运行时加载失败，但已检测到随包携带的固定版本运行时。\n\n"
+                       "请确认安装目录下 webview2_runtime\\msedgewebview2.exe 未被杀毒软件隔离或删除，\n"
+                       "或重启后再试。")
+            else:
+                msg = ("未找到随包携带的 WebView2 固定版本运行时（webview2_runtime 目录缺失），\n"
+                       "且系统未安装 Microsoft Edge WebView2 Runtime。\n\n"
+                       "请重新安装本软件，或从以下地址手动安装 WebView2 Runtime：\n"
+                       "https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/\n\n"
+                       "（后端服务仍可后台运行，可在浏览器打开 http://127.0.0.1:8911 管理）")
         _show_error("GoofishMasterDesktop · 启动失败", msg)
     finally:
         # 窗口真正关闭（或销毁）后，确保后端关停

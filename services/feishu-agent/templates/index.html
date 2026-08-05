@@ -385,7 +385,7 @@
                     </div>
 
                     <div class="glass-card span-12">
-                        <h3>📋 任务中心<span class="sub">监控任务持久化于 Postgres · 搜索为一次性指令</span></h3>
+                        <h3>📋 任务中心<span class="sub">监控任务持久化于 SQLite（内嵌）· 搜索为一次性指令</span></h3>
                         <div id="task-center">加载中...</div>
                     </div>
 
@@ -799,9 +799,10 @@
                 document.getElementById('ai-router-stats').innerHTML = aiHtml;
 
                 // Infrastructure
-                const infraNames = {postgres: '🐘 PostgreSQL', redis: '📦 Redis', qdrant: '🔮 Qdrant'};
+                const infraNames = {postgres: '🐘 PostgreSQL', sqlite: '🗄️ SQLite（内嵌）', redis: '📦 Redis', qdrant: '🔮 Qdrant'};
                 const infraFeatures = {
                     postgres: '持久化监控任务 / AI 调用统计',
+                    sqlite: '持久化监控任务 / 商品库 / 调用统计（桌面端内嵌）',
                     redis: '会话保持 / 登录限流 / 结果缓存',
                     qdrant: 'RAG 知识库语义检索'
                 };

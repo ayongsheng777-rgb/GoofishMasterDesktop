@@ -30,3 +30,6 @@ pydantic-settings>=2.0
 # ---- 桌面壳 ----
 pywebview>=5.0
 pystray>=0.19
+
+# ---- 时区数据（Windows/PyInstaller 无系统 IANA 库，ZoneInfo 必须靠它）----
+tzdata>=2024.1

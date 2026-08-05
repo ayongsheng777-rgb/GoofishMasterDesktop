@@ -15,11 +15,16 @@ release/
 build_p1.log
 installer/
 *.log
+*_log.txt
+edgeupd*.json
 
 # 临时
 .wtest
 
 # 构建资源目录（含 200MB 离线安装器与临时日志，均从官方下载/生成，不入版本库）
 build-assets/*
+
+# 随包固定版本 WebView2 运行时（从本机已装目录复制，约 500MB，不入库；由安装器随附）
+webview2_runtime/
 
 # 注：app.ico 是程序图标，需要纳入版本控制（PyInstaller 打包 / Inno Setup 安装包引用）
