@@ -178,3 +178,7 @@ body {
 .modal-card p { color: var(--text); line-height: 1.7; margin-bottom: 10px; font-size: 13px; }
 .modal-card .muted { color: var(--text-muted); }
 .modal-card .btn { margin-top: 6px; }
+.disclaimer-box { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.disclaimer-box strong { display: block; color: var(--text); margin-bottom: 6px; font-size: 13px; }
+.disclaimer-box p { margin: 0 0 6px; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
+.disclaimer-box p:last-child { margin-bottom: 0; }
