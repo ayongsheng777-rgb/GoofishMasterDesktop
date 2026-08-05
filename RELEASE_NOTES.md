@@ -86,4 +86,4 @@
 - 安装包：`GoofishMasterDesktop-Setup-1.0.0.exe`
 - 大小：约 509 MB
 - 平台：Windows 10 / 11（x64）
-- 许可：Private
+- 许可：MIT

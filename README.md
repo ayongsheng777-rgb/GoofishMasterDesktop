@@ -295,6 +295,12 @@ GoofishMasterDesktop/
 
 本项目的诞生离不开原作者的贡献，郑重致谢；也推荐有服务器 / Docker 部署条件的朋友去原项目点个 Star ⭐ 表示支持。
 
+## 免责声明
+
+本软件仅供**个人学习、技术研究与非商业用途**。使用者须遵守闲鱼等相关平台的服务条款与所在地法律法规，自行控制访问频率与规模、不得从事违规或侵权行为。作者不对使用后果承担任何责任，软件按「现状」提供、不作任何担保。完整条款见 [DISCLAIMER.md](DISCLAIMER.md)。
+
 ## License
 
-Private
+本项目采用 [MIT 许可证](LICENSE)。
+
+> 本项目参考并借用了 [Usagi-org/ai-goofish-monitor](https://github.com/Usagi-org/ai-goofish-monitor)（MIT 许可证）的部分代码，依 MIT 条款保留其版权声明与许可声明。

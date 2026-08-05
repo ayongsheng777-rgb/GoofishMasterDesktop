@@ -65,4 +65,4 @@
 
 完整发行说明见仓库 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-**校验信息**：版本 `v1.0.0-beta.1` · 安装包 `GoofishMasterDesktop-Setup-1.0.0.exe` · 约 509 MB · Windows 10/11 x64 · 许可 Private
+**校验信息**：版本 `v1.0.0-beta.1` · 安装包 `GoofishMasterDesktop-Setup-1.0.0.exe` · 约 509 MB · Windows 10/11 x64 · 许可 MIT
