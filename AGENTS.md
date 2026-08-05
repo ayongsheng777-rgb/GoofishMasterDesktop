@@ -312,7 +312,8 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **已删除**：`.build/`（08-04 过期构建快照，此前保留的 dist_20260804_183919 已落后于 10 个 BUG 修复）、`build/`（PyInstaller 工作目录，可再生）、根 `__pycache__/`、`build_log.txt`/`build_p1.log`/`iscc_log.txt`（构建日志）、`edgeupd.json`/`edgeupd2.json`（WebView2 探测垃圾，preflight 会再生）。
 - **`.gitignore` 新增**：`demo_ppt/`、`demo_fe/`、`demo_promo/`（演示图生成脚本，本地营销素材工具，产出在项目外目录，不入库）。
 - **保留**：`dist/`（当前构建）、`release/`（当前发布产物）、`installer/`（最新安装包）、`webview2_runtime/`（约 500MB 随包运行时）、`data/`、`config/`、`demo/`（README 引用的演示截图，已入库）、`assets/`（捐赠二维码，已入库）。
-- **文档同步**：README 下载说明（约 580MB + 已含全部实测修复）、排障表新增「搜索未找到→先登录闲鱼」「监控无反馈→用新包」两行、目录结构补 `assets/`/`demo/`；RELEASE_NOTES/RELEASE_BODY 修正 WebView2 描述（固定版运行时替代离线安装器）、体积 509→580MB、新增实测修复清单与 SHA-256、捐赠图 URL 由 `master` 改 `main`（分支收敛后 master 已删，旧 URL 已失效）。
+- **文档同步**：README 下载说明（约 580MB + 已含全部实测修复）、排障表新增「搜索未找到→先登录闲鱼」「监控无反馈→用新包」两行、目录结构补 `assets/`/`demo/`；RELEASE_NOTES/RELEASE_BODY 修正 WebView2 描述（固定版运行时替代离线安装器）、体积 509→580MB、新增实测修复清单与 SHA-256。
+- **捐赠二维码（20:2x 二次修正）**：仓库为 Private，`raw.githubusercontent.com` 直链浏览器无凭据恒 404（此前 master→main 的修正无效）。最终方案：README/RELEASE_NOTES 用**相对路径** `assets/donate-*`（blob 视图可解析）；RELEASE_BODY 用 **Release 附件直链** `releases/download/v1.0.0-beta.1/donate-*`（两张二维码已作为附件上传）。规则：私有仓库插图=仓库页相对路径、Release 页附件直链。
 
 ---
 
