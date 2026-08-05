@@ -85,7 +85,7 @@ GoofishMasterDesktop/
 
 1. **launcher 注入**（`build_env`）：后端 `enabled=true` 时注入 `REDIS_ENABLED=true` / `POSTGRES_ENABLED=true` / `QDRANT_ENABLED=true`；`enabled=false` 时注入 `=false`（各服务据此直接降级）。URL 类变量（REDIS_URL/DATABASE_URL/QDRANT_URL）已无实际用途，但 launcher 仍按 `name.upper()` 注入以兼容。
 2. **各服务短路跳过**（不再连死地址、不重试/退避）：
-   - `ai-router/db.py`、`agent-pipeline/db.py`：`DATABASE_ENABLED` 实际读 `POSTGRES_ENABLED`（与 launcher 注入对齐），为 false 时 `_disabled=True; return`，不建 SQLite 连接。
+   - `ai-router/db.py`、`agent-pipeline/db.py`：`DATABASE_ENABLED` 默认 `True`（桌面端固定启用内嵌 SQLite 持久化），仅当显式 `SQLITE_DISABLED=1/true` 才降级。**注意：旧实现误读 `POSTGRES_ENABLED` 当开关，而桌面 `postgres` 后端默认 `enabled=false` → `POSTGRES_ENABLED=false` → 把 SQLite 一起关掉 → 监控任务无法持久化（"监控一直无反馈"）。2026-08-05 已修正为读 `SQLITE_DISABLED`，与 `POSTGRES_ENABLED` 解耦**（见 §8.2 BUG-7）。
    - `feishu-agent/auth.py`：`_redis()` 在 `if not REDIS_ENABLED:` 时置 `_redis_client=False` 直接返回（fakeredis 内存兜底）。
    - `agent-pipeline/main.py`：`_get_redis()` 同理短路。
    - `ai-router/rag.py`：`init_rag()` 开头 `if not QDRANT_ENABLED:` → `_state={"enabled":False,"reason":"backend disabled (optional, not enabled)"}` 并 `return`。
@@ -243,10 +243,12 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 | 3 | `agent-pipeline/main.py` | `_save_last_search` 只把搜索任务元数据存进 fakeredis 的 `last_search:global`，fakeredis 进程内内存非持久化，重启即清空 → 任务中心空 | 额外落盘 `agent-pipeline/data/last_search.json`，启动时优先从磁盘恢复（fakeredis 作次级兜底） |
 | 4 | `feishu-agent/templates/index.html` | `getQRCode()` 先设 `img.src` 再把父容器 `display:none→block`，img 在隐藏容器内设 src 后取消隐藏，部分浏览器不触发重绘 → 首次不显示，需二次点击 | 改为先 `removeAttribute('src')` + 显示容器，再设 `src`；缺图显式报错 |
 | 5 | `feishu-agent/auth.py` | TOTP 验证器二维码的 issuer 写死 `AI-Goofish-V2`，扫码后验证器（Google Authenticator / 腾讯云验证器等）显示该旧名 | 抽模块常量 `APP_DISPLAY_NAME = "GoofishMasterDesktop"`，`get_totp_uri` 默认 issuer 改用它；两处调用 `generate_totp_qrcode` / `main.py:848` 不传 issuer 走默认 → 全部一致 |
+| 6 | `agent-pipeline/db.py` | `DATABASE_ENABLED` 误读 `POSTGRES_ENABLED` 当开关；桌面 `postgres` 后端默认 `enabled=false` → `POSTGRES_ENABLED=false` → **SQLite 被一起关掉** → `monitor.create_task` 抛「数据库不可用，监控任务无法持久化」→ 监控任务存不进、调度器无库 → "监控一直无反馈" | `DATABASE_ENABLED` 改为读 `SQLITE_DISABLED`（默认启用，仅 `SQLITE_DISABLED=1/true` 才降级），与 `POSTGRES_ENABLED` 解耦；桌面端固定启用内嵌 SQLite 持久化 |
+| 7 | `agent-pipeline/main.py`（`pipeline_search`）+ `feishu-agent/templates/index.html` | ① 未登录闲鱼时闲鱼返回登录墙、抓到 0 条，却被显示成"未找到符合条件的商品"，误导用户去换关键词；② `pipeline_search` 只检查 `login_expired`/`risk_control`，不检查 `status="failed"`，浏览器崩溃/采集异常也被误报为"未找到" | ① 搜索前先查 `SPIDER_URL/api/login/status`，`logged_in=False` 直接返回"尚未登录闲鱼，请到「🐟 闲鱼登录」扫码"；② 新增 `status=="failed"` 分支如实上报"采集失败：…"；③ 控制台"任务中心"副标题 Postgres→SQLite 文案修正 |
 
 **图标集成（app.ico）**：根目录 `app.ico` 升级为含 16/24/32/48/64/128/256 多尺寸标准 ICO（手动按 ICO 规范组装 PNG 帧；PIL 本机写入器只产单帧）；`GoofishMasterDesktop.spec` 的 `datas` 增加 `('app.ico','.')` 使其打进 `_internal`；`desktop/app.py` 窗口与托盘图标优先用 `app.ico`，缺失回退 `logo-256.png`。exe 图标由 spec `icon=` 指定、安装器图标由 `.iss` 的 `SetupIconFile` 指定。
 
-**验证**：`py_compile` 全过；BUG2/BUG3 功能测试 round-trip 与落盘恢复均通过；BUG1/BUG4/BUG5 经代码审查确认链路闭合。
+**验证**：`py_compile` 全过；BUG2/BUG3 功能测试 round-trip 与落盘恢复均通过；BUG1/BUG4/BUG5/BUG6/BUG7 经代码审查确认链路闭合（BUG7 的登录预检为新增防御，旧版 spider 无 `/api/login/status` 时 try/except 静默跳过不阻断）。
 
 ---
 

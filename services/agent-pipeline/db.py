@@ -32,8 +32,12 @@ DATA_DIR = Path(os.environ.get("DATA_DIR")
                 or Path(__file__).resolve().parents[2] / "data" / "agent-pipeline")
 DB_PATH = DATA_DIR / "goofish.db"
 
-# 后端未启用（极端兜底）时跳过连接，功能降级
-DATABASE_ENABLED = os.environ.get("POSTGRES_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+# 桌面端固定使用内嵌 SQLite 持久化（监控任务 / 商品库 / 调用统计），
+# 不依赖任何外部数据库。原逻辑用 POSTGRES_ENABLED 当开关，但桌面配置里
+# postgres 后端默认禁用 → POSTGRES_ENABLED=false → 把 SQLite 也一起关掉，
+# 导致监控任务无法持久化（表现为"监控一直无反馈"）。
+# 改为：SQLite 默认启用，仅当显式 SQLITE_DISABLED=1/true 时才降级。
+DATABASE_ENABLED = os.environ.get("SQLITE_DISABLED", "false").lower() not in ("1", "true", "yes", "on")
 
 # 这些列以 JSON 文本存储，读取时反序列化为 Python 对象
 _JSON_COLS = {"exclude_keywords", "images", "ai_analysis", "risk_reason"}
