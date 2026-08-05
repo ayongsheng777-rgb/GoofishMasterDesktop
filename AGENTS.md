@@ -281,6 +281,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 | 6 | GitHub 存在 main + master 两分支且分叉（本地分支曾是 master 并推 master；main 有 PR#1 合并提交） | 本地提交推 master → API merge master→main → 删远程 master → 本地改名 main 跟踪 origin/main。**此后只有 main** |
 | 7 | 桌面控制台「关于」弹层缺项目地址 | 新增 GitHub 链接：`desktop/api.py` `open_github()`（webbrowser 系统浏览器打开，避免 pywebview 内导航）+ `index.html` 链接 + `app.js` 绑定（`e.preventDefault()`） |
 | 8 | README 过时文案：509MB（实际 ~600MB）、WebView2 离线安装器静默装（方案 A 残留，已改方案 B 固定版运行时随包）、build-assets 目录描述 | 已同步修正 |
+| 9 | `spider-service/src/failure_guard.py` | 用户实测搜索报「采集失败：[WinError 5] 拒绝访问：task-failure-guard.json.tmp -> .json」——**真实采集失败原因被 guard 自身错误掩盖**。根因叠加：① `_update_task` 持有目标文件句柄（`open("a+")`）时调 `os.replace`，Windows 不允许替换打开中的文件 → 必炸 WinError 5（Linux 无此限制，fork 期遗留）；② `_FileLock` 用 fcntl，Windows 无此模块，ImportError 被吞 → 实际无锁；③ 默认路径 `logs/...` 相对 CWD，安装目录不可写时是第二颗雷；④ tmp 名固定，并发写互踩 | 读写分离（锁内只读、关句柄后再写盘）；_FileLock 支持 msvcrt.locking；tmp 名唯一化(pid+线程+毫秒)+replace 退避重试；默认路径 DATA_DIR 感知+项目内兜底；record_success/record_failure/should_skip_start 写盘失败打印警告不抛出（辅助功能不反噬主流程） |
 
 **产物同步纪律（本次教训）**：改完源码后发布链路 = `改源码 → cp 数据文件到 dist（或重跑 PyInstaller）→ dist 同步 release（exe+_internal，保留 playwright-browsers）→ iscc → curl 上传`。任何一环断了，GitHub 上的安装包就不是最新代码。
 
@@ -400,6 +401,7 @@ release\GoofishMasterDesktop\GoofishMasterDesktop.exe start     # 编排 + 看�
 | 双击 exe 闪退（无窗口无提示） | GUI 线程崩 / WebView2 缺失 / 依赖 | 看 `data/logs/desktop-crash.log` + 错误框；`start` 若正常则问题在 GUI/WebView2（`--windowed` 已去黑框） |
 | 登陆后顶部弹「服务异常：qdrant — 请检查服务状态」 | 旧版 `/api/system/overview` 写死探测 `http://qdrant:6333/healthz`（Docker 名），桌面版无该容器必失败→误判。已修复：`backends.*.enabled=false` 标 `disabled`（可选未启用，非异常）；P1 后向量库改为进程内 Chroma，`enabled=true` 直接判 `running`，不再探测外部端口 | 升级到含此修复的 exe 即可；P1 默认 `qdrant.enabled=true`，RAG 知识库自动启用（需配 embedding key） |
 | overview 三项基础设施全 `disabled` + `system_status=degraded`（但 config 里 `enabled=true`） | feishu-agent/main.py 顶部 try 块用了 `sys.path.insert` 却**没 `import sys`** → NameError 被静默吞 → `cfg_mod=None` → overview 读不到配置。2026-08-04 修：import 行补 `sys`。旧版因 config 本就 enabled=false 而隐形 | 源码已修；`_internal/services/*/main.py` 是**数据文件**（非 PYZ 编译），单文件 cp 同步即等效重打包，无需整包重建 |
+| 搜索/监控报「采集失败：[WinError 5] 拒绝访问：…task-failure-guard.json」 | failure_guard 持有目标文件句柄时 `os.replace`（Windows 必炸）+ fcntl 在 Windows 无锁 + 相对 CWD 路径（BUG-9，见 §8.4）——真实失败原因被 guard 错误掩盖 | 已修：读写分离 + msvcrt 锁 + DATA_DIR 绝对路径 + 写盘失败兜底不抛出。升级到含此修复的包；修复后若再报采集失败，显示的才是真实原因 |
 | 搜索/监控报「采集失败：No time zone found with key Asia/Shanghai」 | Windows / PyInstaller 无系统 IANA 时区库，且 `tzdata` 未装/未打包 → `zoneinfo.ZoneInfo("Asia/Shanghai")` 调用时抛 `ZoneInfoNotFoundError`，整次采集崩 | 已修（BUG-8，见 §8.3）：`failure_guard.py` 回退固定东八区 + `tzdata` 入 `requirements.txt` 与 spec `hiddenimports`。升级到含此修复的 exe 即可；代码兜底保证即使 tzdata 缺失也不崩 |
 
 ---
