@@ -72,6 +72,15 @@ def _webview2_installed() -> bool:
     return False
 
 
+def _bundled_webview2_runtime() -> bool:
+    """检测是否随包携带固定版本 WebView2 运行时（webview2_runtime/msedgewebview2.exe）。"""
+    try:
+        exe_dir = Path(sys.executable).resolve().parent
+        return (exe_dir / "webview2_runtime" / "msedgewebview2.exe").exists()
+    except Exception:
+        return False
+
+
 def _bundled_browsers_dir() -> Path:
     """打包产物中随附的 Playwright Chromium 目录（安装时落盘到 app 同级）。"""
     env_dir = os.environ.get("PLAYWRIGHT_BROWSERS_PATH")
@@ -95,13 +104,13 @@ def _chromium_installed() -> bool:
 
 def check_prerequisites() -> dict:
     """返回前置依赖检测结果（供桌面控制台 / preflight 命令使用）。"""
-    webview2 = _webview2_installed()
+    webview2 = _webview2_installed() or _bundled_webview2_runtime()
     chromium = _chromium_installed()
     return {
         "webview2_installed": webview2,
         "webview2_message": (
-            "已安装" if webview2 else
-            "未检测到 WebView2 Runtime，桌面窗口无法打开（安装包会自动安装）"
+            "已就绪（系统 Runtime 或随包固定版本）" if webview2 else
+            "未检测到 WebView2 Runtime 且未随包携带固定版本，桌面窗口无法打开"
         ),
         "chromium_installed": chromium,
         "chromium_message": (

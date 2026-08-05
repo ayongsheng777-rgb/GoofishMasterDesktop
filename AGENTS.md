@@ -250,6 +250,20 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 ---
 
+## 8.3 2026-08-05 后续修复（图标崩溃 + WebView2 固定版打包）
+
+| # | 位置 | 问题 | 修法 |
+|---|------|------|------|
+| 6 | `desktop/app.py` | `webview.create_window(..., icon=...)` 触发 `TypeError: got an unexpected keyword argument 'icon'` → 桌面窗口启动即崩（含 `data/logs/desktop-crash.log` 报错）。根因：本机 pywebview 版本的 `create_window` **不支持 `icon` 参数**（`Window` 类也无 `icon` 属性） | 删除 `icon=` 关键字；窗口图标由 exe 内嵌的 `app.ico`（PyInstaller spec `icon=`）提供。另修一处隐患：`app.py` 第 ~137 行用了 `Path(cand)` 但模块未导入 `Path` → 补 `from pathlib import Path`（否则修完图标后会立刻触发 `NameError`） |
+| 7 | 安装/分发 | 部分机器未预装系统 WebView2 Runtime，且 `.iss` 把离线安装器声明 `dontcopy` 却从不 `ExtractTemporaryFile`，`{tmp}` 始终无该 exe → 弹「未找到 WebView2 离线安装器」且无法打开桌面窗口 | **改为打包固定版本 WebView2 运行时（方案 B）**：从本机已装目录 `C:\Program Files (x86)\Microsoft\EdgeWebView\Application\151.0.4129.59\` 复制整个文件夹到项目 `webview2_runtime/`（含 `msedgewebview2.exe` + `EBWebView/`）；`desktop/app.py` 启动前置 `_resolve_webview2_runtime()` 设 `os.environ['WEBVIEW2_RUNTIME_PATH']` 指向它；`edgechromium.py` 原生读取该变量 → **完全不依赖系统 Runtime、免 UAC、免联网**。`WebView2Loader.dll` 由 pywebview 自带（`_internal/webview/lib/runtimes/win-x64/native/`，`edgechromium.py` 已加进 PATH），无需复制。`.iss` 新增 `Source: "webview2_runtime\*"; DestDir: "{app}\webview2_runtime"`；删除原 `ShellExec('runas',...)` 提权安装分支与 `dontcopy` 离线安装器声明；`launcher.check_prerequisites()` 把「随包固定版」也判为已就绪 |
+
+**注意**：
+- `webview2_runtime/` 约 500MB，**已加入 `.gitignore`**（从本机复制，不入库）；安装器随之膨胀到约 1GB。
+- 固定版运行时版本跟随本机 EdgeWebView（当前 151.0.4129.59）。换机/升级时若需更新，重新从该机 `EdgeWebView\Application\<版本>\` 复制覆盖即可。
+- **GitHub Release 上传坑**：`gh release upload` 经代理（HTTPS_PROXY）上传 500MB+ 大文件时返回 `HTTP 400 Bad Request`（疑代理干扰 `gh` 的 multipart 请求）。改用 `curl` 直传 `uploads.github.com/.../releases/<id>/assets?name=...`：显式 `Content-Type: application/octet-stream` + `-x http://127.0.0.1:1080`，实测可用。
+
+---
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。

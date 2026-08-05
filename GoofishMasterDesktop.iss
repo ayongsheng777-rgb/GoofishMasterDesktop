@@ -48,8 +48,8 @@ Source: "release\GoofishMasterDesktop\_internal\*"; DestDir: "{app}\_internal"; 
 Source: "release\GoofishMasterDesktop\playwright-browsers\*"; DestDir: "{app}\playwright-browsers"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; config.example.json 供参考
 Source: "config.example.json"; DestDir: "{app}"; Flags: ignoreversion
-; WebView2 Runtime 离线完整安装器（Evergreen Standalone Offline Installer，约 200MB，安装时无需联网）
-Source: "build-assets\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: ignoreversion dontcopy
+; 随包固定版本 WebView2 运行时（从本机已装目录复制，约 500MB；免系统 Runtime / 免 UAC / 免联网）
+Source: "webview2_runtime\*"; DestDir: "{app}\webview2_runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
@@ -117,27 +117,7 @@ var
 begin
   if CurStep = ssPostInstall then
   begin
-    { 若未安装 WebView2 Runtime，调用离线完整安装器（已随包打包，无需联网） }
-    if not IsWebView2Installed then
-    begin
-      WebView2Path := ExpandConstant('{tmp}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe');
-      if FileExists(WebView2Path) then
-      begin
-        { 离线安装器会写入 Program Files / HKLM，必须以管理员身份运行，
-          故用 ShellExec('runas') 请求提权；用户拒绝安装仍不阻断主程序安装 }
-        if not ShellExec('runas', WebView2Path, '/silent /install', '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then
-          MsgBox('WebView2 Runtime 离线安装器启动失败（可能需要管理员权限）。' + #13#10 +
-                 '桌面窗口需要它才能打开，请手动以管理员身份安装 build-assets 中的安装器，' + #13#10 +
-                 '或从 https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/ 下载。', mbInformation, MB_OK)
-        else if ResultCode <> 0 then
-          MsgBox('WebView2 Runtime 安装返回非 0 状态码：' + IntToStr(ResultCode) + '。' + #13#10 +
-                 '桌面窗口需要它才能打开，请检查后手动安装 WebView2 Runtime。', mbInformation, MB_OK);
-      end
-      else
-        MsgBox('未找到 WebView2 离线安装器，且系统未安装 WebView2 Runtime。' + #13#10 +
-               '桌面窗口需要它才能打开，请手动安装 WebView2 Runtime：' + #13#10 +
-               'https://developer.microsoft.com/zh-cn/microsoft-edge/webview2/', mbInformation, MB_OK);
-    end;
+    { 固定版本 WebView2 运行时已随包携带（webview2_runtime\），无需再安装系统 Runtime，免 UAC / 免联网 }
 
     ConfigDir := ExpandConstant('{app}\config');
     ConfigPath := ConfigDir + '\config.json';
