@@ -5,7 +5,7 @@ from PyInstaller.utils.hooks import collect_all
 # （exe 同级目录），_internal/config 永远读不到，纯属多余；而它会把本机生成的
 # secret_key 内嵌进每一份分发产物（解包即得内部鉴权密钥）。缺配置时
 # common.config.load_config() 会自动用 _default_config() 生成并随机 secret_key。
-datas = [('common', 'common'), ('services', 'services'), ('knowledge-base', 'knowledge-base'), ('desktop', 'desktop')]
+datas = [('common', 'common'), ('services', 'services'), ('knowledge-base', 'knowledge-base'), ('desktop', 'desktop'), ('app.ico', '.')]
 binaries = []
 hiddenimports = ['json', 'os', 'secrets', 'sys', 'webview.platforms.edgechromium', 'chromadb', 'fakeredis', 'aiosqlite']
 tmp_ret = collect_all('lark_oapi')

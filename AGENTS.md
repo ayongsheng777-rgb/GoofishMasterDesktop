@@ -232,6 +232,24 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 ---
 
+## 8.2 2026-08-05 测试期 BUG 修复（v1.0.0-beta.1 前）
+
+用户实测反馈的 BUG，根因与修法：
+
+| # | 位置 | 问题 | 修法 |
+|---|------|------|------|
+| 1 | `feishu-agent/main.py` | WebUI 只把 AI 配置写 `data/feishu-agent/ai_config.json`，但 launcher 重启只从 `config.json` 的 `ai.*` 注入 env，两者分叉 → 重启后 ai-router 无 key、控制台显示「未配置」 | 保存时 `_persist_ai_config_to_config_json()` 回写 3 key + 代理到 `config.json`；飞书凭证 `_handle_success` 回写 `feishu.app_id/secret`；启动 `_replay_ai_config_on_boot()` 对 ai-router 重放 `ai_config.json`（覆盖 openai/zhipu/moonshot 等 launcher 不注入的 provider） |
+| 2 | `agent-pipeline/db.py` + `monitor.py` | `monitor.create_task` 把 `exclude_keywords`(Python list)直接 INSERT 进 SQLite TEXT 列，sqlite3 无法绑定 list → InterfaceError 被吞 → 返回 None → 抛「数据库不可用，监控任务无法持久化」 | `db.py` 写入/查询层加系统级 `_serialize_args`，对所有 list/dict 参数统一 `json.dumps`；`monitor.create_task` 的 `exclude_keywords` 显式 `db.to_json(...)` 双保险；读取时 `_row_to_dict` 自动还原 |
+| 3 | `agent-pipeline/main.py` | `_save_last_search` 只把搜索任务元数据存进 fakeredis 的 `last_search:global`，fakeredis 进程内内存非持久化，重启即清空 → 任务中心空 | 额外落盘 `agent-pipeline/data/last_search.json`，启动时优先从磁盘恢复（fakeredis 作次级兜底） |
+| 4 | `feishu-agent/templates/index.html` | `getQRCode()` 先设 `img.src` 再把父容器 `display:none→block`，img 在隐藏容器内设 src 后取消隐藏，部分浏览器不触发重绘 → 首次不显示，需二次点击 | 改为先 `removeAttribute('src')` + 显示容器，再设 `src`；缺图显式报错 |
+| 5 | `feishu-agent/auth.py` | TOTP 验证器二维码的 issuer 写死 `AI-Goofish-V2`，扫码后验证器（Google Authenticator / 腾讯云验证器等）显示该旧名 | 抽模块常量 `APP_DISPLAY_NAME = "GoofishMasterDesktop"`，`get_totp_uri` 默认 issuer 改用它；两处调用 `generate_totp_qrcode` / `main.py:848` 不传 issuer 走默认 → 全部一致 |
+
+**图标集成（app.ico）**：根目录 `app.ico` 升级为含 16/24/32/48/64/128/256 多尺寸标准 ICO（手动按 ICO 规范组装 PNG 帧；PIL 本机写入器只产单帧）；`GoofishMasterDesktop.spec` 的 `datas` 增加 `('app.ico','.')` 使其打进 `_internal`；`desktop/app.py` 窗口与托盘图标优先用 `app.ico`，缺失回退 `logo-256.png`。exe 图标由 spec `icon=` 指定、安装器图标由 `.iss` 的 `SetupIconFile` 指定。
+
+**验证**：`py_compile` 全过；BUG2/BUG3 功能测试 round-trip 与落盘恢复均通过；BUG1/BUG4/BUG5 经代码审查确认链路闭合。
+
+---
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。
@@ -258,7 +276,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - GitHub：`ayongsheng777-rgb/GoofishMasterDesktop`（Private）
 - `.venv/`、`config/config.json`、`data/`、`build/`、`dist/`、`release/`、`installer/` 已 gitignore。
 - git 邮箱用 noreply 隐私保护：`277914440+ayongsheng777-rgb@users.noreply.github.com`
-- `git push` 不走代理（`git config --global --unset http/https.proxy` 后直连），避免代理干扰 git smart HTTP 协议。
+- `git push` **走代理**（GitHub 属境外服务，本机直连不通）：push 前 `git config --global http.proxy http://127.0.0.1:1080 && git config --global https.proxy http://127.0.0.1:1080`，再 `git push`；API 调用（curl/Python）同理可用代理。
 - 提交信息用中文，说明改了哪层（launcher/common/desktop 还是 services 业务逻辑）。
 
 ---

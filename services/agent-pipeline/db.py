@@ -180,6 +180,21 @@ def _row_to_dict(row) -> Optional[dict]:
     return d
 
 
+def _serialize_param(v: Any) -> Any:
+    """SQLite 无法绑定 list/dict（会抛 InterfaceError）。原 Docker 项目用
+    asyncpg 的 ::jsonb 自动处理，桌面端 SQLite 的文本列需要显式 JSON 化。
+    save_analysis_to_db 已对 images/ai_analysis/risk_reason 调 db.to_json，
+    但 monitor.create_task 的 exclude_keywords 等裸 list 仍会触发绑定失败 →
+    监控任务建库报「数据库不可用」。这里在写入/查询参数层统一兜底。"""
+    if isinstance(v, (list, dict)):
+        return json.dumps(v, ensure_ascii=False, default=str)
+    return v
+
+
+def _serialize_args(args: tuple) -> tuple:
+    return tuple(_serialize_param(a) for a in args)
+
+
 async def ensure_schema() -> None:
     """确保表存在（幂等）。由服务启动时调用；连接建立时也会自动建表。"""
     conn = await _get_conn()
@@ -193,7 +208,7 @@ async def execute(query: str, *args) -> int:
     if conn is None:
         return 0
     try:
-        cur = await conn.execute(_norm(query), args)
+        cur = await conn.execute(_norm(query), _serialize_args(args))
         await conn.commit()
         return cur.rowcount
     except Exception as e:
@@ -206,7 +221,7 @@ async def fetch(query: str, *args) -> list:
     if conn is None:
         return []
     try:
-        cur = await conn.execute(_norm(query), args)
+        cur = await conn.execute(_norm(query), _serialize_args(args))
         rows = await cur.fetchall()
         return [_row_to_dict(r) for r in rows]
     except Exception as e:
@@ -219,7 +234,7 @@ async def fetchrow(query: str, *args) -> Optional[dict]:
     if conn is None:
         return None
     try:
-        cur = await conn.execute(_norm(query), args)
+        cur = await conn.execute(_norm(query), _serialize_args(args))
         row = await cur.fetchone()
         return _row_to_dict(row)
     except Exception as e:
@@ -232,7 +247,7 @@ async def fetchval(query: str, *args) -> Any:
     if conn is None:
         return None
     try:
-        cur = await conn.execute(_norm(query), args)
+        cur = await conn.execute(_norm(query), _serialize_args(args))
         row = await cur.fetchone()
         if row is None:
             return None

@@ -950,8 +950,18 @@
             try {
                 const resp = await apiFetch('/api/qrcode', {method: 'POST'});
                 const data = await resp.json();
-                document.getElementById('qrcode-img').src = 'data:image/png;base64,' + data.qrcode_img;
-                document.getElementById('qrcode-area').style.display = 'block';
+                if (!data.qrcode_img) {
+                    showToast('获取二维码失败：服务端未返回图片', 'error');
+                    return;
+                }
+                const area = document.getElementById('qrcode-area');
+                const img = document.getElementById('qrcode-img');
+                // 先清旧图并强制容器可见，再设 src：img 在 display:none 容器内
+                // 设 src 后取消隐藏，部分浏览器不触发重绘 → 首次不显示、需二次
+                // 点击。先显示容器可规避该 repaint 问题。
+                img.removeAttribute('src');
+                area.style.display = 'block';
+                img.src = 'data:image/png;base64,' + data.qrcode_img;
                 document.getElementById('scan-btn').style.display = 'none';
                 pollToken = data.poll_token; startPolling();
             } catch(e) { showToast('获取二维码失败: ' + e.message, 'error'); }

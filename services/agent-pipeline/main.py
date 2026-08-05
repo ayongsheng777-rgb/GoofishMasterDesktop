@@ -123,12 +123,24 @@ async def _load_last_results(open_id: str) -> List[Dict[str, Any]]:
 
 
 # Last search meta for WebUI 任务中心（type=search 与 monitor 任务并列展示）
+# 持久化到磁盘（agent-pipeline DATA_DIR/last_search.json）：fakeredis 是进程内
+# 内存、非持久化，重启即清空 → 搜索任务「消失」。落盘后重启可恢复可见性。
 _last_search: Dict[str, Any] = {}
+_LAST_SEARCH_FILE = db.DATA_DIR / "last_search.json"
 
 
 async def _save_last_search(meta: Dict[str, Any]) -> None:
     global _last_search
     _last_search = dict(meta)
+    # 落盘持久化（优先，重启可恢复）
+    try:
+        db.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        _LAST_SEARCH_FILE.write_text(
+            json.dumps(_last_search, ensure_ascii=False, default=str),
+            encoding="utf-8")
+    except Exception as e:
+        logger.warning("Save last_search file failed: %s", e)
+    # 次级：fakeredis（跨进程共享，但不持久化）
     r = await _get_redis()
     if r:
         try:
@@ -141,6 +153,16 @@ async def _save_last_search(meta: Dict[str, Any]) -> None:
 async def _load_last_search() -> Dict[str, Any]:
     if _last_search:
         return _last_search
+    # 优先从磁盘恢复（重启后这里能拿到）
+    try:
+        if _LAST_SEARCH_FILE.exists():
+            data = json.loads(_LAST_SEARCH_FILE.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                _last_search.update(data)
+                return _last_search
+    except Exception as e:
+        logger.warning("Load last_search file failed: %s", e)
+    # 次级：fakeredis
     r = await _get_redis()
     if r:
         try:

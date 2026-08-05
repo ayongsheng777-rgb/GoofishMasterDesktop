@@ -80,7 +80,7 @@ async def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
         task_id, name, payload.get("keyword", ""),
         payload.get("max_price"), payload.get("min_price"),
         payload.get("seller_type"),
-        payload.get("exclude_keywords") or [],
+        db.to_json(payload.get("exclude_keywords") or []),
         int(payload.get("interval_minutes") or 30),
         payload.get("notify_open_id"), payload.get("created_by"),
         int(payload.get("min_score") or 60),

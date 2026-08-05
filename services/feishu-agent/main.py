@@ -643,6 +643,17 @@ async def _background_poll(token: str, expires_in: int) -> None:
 def _handle_success(creds: Dict[str, str]) -> None:
     save_credentials(creds["app_id"], creds["app_secret"],
                      creds.get("tenant_brand", "feishu"), path=CRED_FILE)
+    # 回写 config.json 的 feishu.*：桌面控制台「配置概览」据此显示已配置
+    # （否则 WebUI 配好后控制台仍显示未配置，与模型配置同源问题）
+    if cfg_mod is not None:
+        try:
+            base = cfg_mod.load_config()
+            feishu = base.setdefault("feishu", {})
+            feishu["app_id"] = creds.get("app_id", "")
+            feishu["app_secret"] = creds.get("app_secret", "")
+            cfg_mod.save_config(base)
+        except Exception as e:
+            logger.warning("Failed to persist feishu creds to config.json: %s", e)
     if creds.get("open_id"):
         (DATA_DIR / "configured_open_id.json").write_text(
             json.dumps({"open_id": creds["open_id"]}), encoding="utf-8")
@@ -954,10 +965,37 @@ async def save_ai_config_endpoint(body: dict):
 
     save_ai_config(config)
 
+    # 持久化回 config.json：launcher 重启时从 config.json 的 ai.* 注入
+    # DEEPSEEK/GEMINI/QWEN_API_KEY 与 AI_PROXY_URL；若不回写，重启后
+    # ai-router 拿不到 key（显示未配置），桌面控制台「配置概览」也读空。
+    _persist_ai_config_to_config_json(config)
+
     # Sync to ai-router
     sync_result = await sync_to_ai_router(config, AI_ROUTER_URL)
 
     return {"success": True, "sync": sync_result}
+
+
+def _persist_ai_config_to_config_json(config: Dict[str, Any]) -> None:
+    """把 AI 配置回写到 canonical config.json（ai.* 段），保证重启后仍生效。
+
+    WebUI 保存的是 data/feishu-agent/ai_config.json，但 launcher 重启时
+    只从 config.json 的 ai.* 注入环境变量；两者分叉会导致「配置显示未配置」。
+    这里把 3 个主 provider 的 key + 全局代理回写，使重启链路闭合。
+    """
+    if cfg_mod is None:
+        return
+    try:
+        base = cfg_mod.load_config()
+        ai = base.setdefault("ai", {})
+        ai["deepseek_api_key"] = config["providers"].get("deepseek", {}).get("api_key", "")
+        ai["gemini_api_key"] = config["providers"].get("gemini", {}).get("api_key", "")
+        ai["qwen_api_key"] = config["providers"].get("qwen", {}).get("api_key", "")
+        ai["proxy_url"] = config.get("proxy_url", "")
+        cfg_mod.save_config(base)
+        logger.info("AI config persisted to config.json")
+    except Exception as e:
+        logger.warning("Failed to persist AI config to config.json: %s", e)
 
 
 @app.post("/api/ai/models")
@@ -1074,7 +1112,27 @@ async def xianyu_delete_state():
 async def startup():
     logger.info("Feishu Agent 启动中...")
     _start_bot_in_thread()
+    # 重启后把已保存的 ai_config.json 重放给 ai-router：launcher 仅向
+    # ai-router 注入 deepseek/gemini/qwen 三个主 provider，其余（openai/
+    # zhipu/moonshot）需由 feishu-agent 启动后重放才能恢复。带重试，
+    # 因为 ai-router 虽先启动但可能尚未完全就绪。
+    asyncio.create_task(_replay_ai_config_on_boot())
     logger.info("Feishu Agent 启动完成")
+
+
+async def _replay_ai_config_on_boot(max_retry: int = 10) -> None:
+    """启动后把本地 ai_config.json 重放给 ai-router（覆盖所有 provider）。"""
+    for i in range(max_retry):
+        try:
+            cfg = load_ai_config()
+            if any(p.get("api_key") for p in cfg.get("providers", {}).values()):
+                await sync_to_ai_router(cfg, AI_ROUTER_URL)
+                logger.info("已重放 AI 配置到 ai-router")
+            return
+        except Exception as e:
+            if i == 0:
+                logger.info("启动重放 AI 配置到 ai-router 重试中: %s", e)
+            await asyncio.sleep(2)
 
 
 # ============ System Overview Endpoint ============
