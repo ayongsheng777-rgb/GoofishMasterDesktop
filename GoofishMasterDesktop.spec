@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_all
 # common.config.load_config() 会自动用 _default_config() 生成并随机 secret_key。
 datas = [('common', 'common'), ('services', 'services'), ('knowledge-base', 'knowledge-base'), ('desktop', 'desktop'), ('app.ico', '.')]
 binaries = []
-hiddenimports = ['json', 'os', 'secrets', 'sys', 'webview.platforms.edgechromium', 'chromadb', 'fakeredis', 'aiosqlite']
+hiddenimports = ['json', 'os', 'secrets', 'sys', 'webview.platforms.edgechromium', 'chromadb', 'fakeredis', 'aiosqlite', 'tzdata']
 tmp_ret = collect_all('lark_oapi')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 # P1 单用户化：qdrant_client/asyncpg 已移除，替换为嵌入式向量库/数据库
