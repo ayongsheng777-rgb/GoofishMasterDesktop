@@ -21,6 +21,11 @@ edgeupd*.json
 # 临时
 .wtest
 
+# 演示图生成脚本（本地营销素材工具，产出在项目外目录，不入库）
+demo_ppt/
+demo_fe/
+demo_promo/
+
 # 构建资源目录（含 200MB 离线安装器与临时日志，均从官方下载/生成，不入版本库）
 build-assets/*
 

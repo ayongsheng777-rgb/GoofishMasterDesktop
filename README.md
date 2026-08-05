@@ -8,7 +8,9 @@
 
 > 当前为测试版（Beta）发布，安装包**未做数字签名**，Windows SmartScreen 可能弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」即可，不影响功能。
 
-- **GitHub Releases**：[v1.0.0-beta.1 安装包（约 600MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.0.0-beta.1)
+- **GitHub Releases**：[v1.0.0-beta.1 安装包（约 580MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.0.0-beta.1)
+
+> 当前安装包已包含截至 2026-08-05 的全部实测修复（监控持久化、搜索恢复、已发现数量统计、飞书停止/删除指令等 10 项），并在真机完整验证通过。
 
 ## 特性
 
@@ -242,6 +244,8 @@ GoofishMasterDesktop/
 │   ├── agent-pipeline/      # 编排 + 决策打分
 │   └── spider-service/      # 闲鱼采集（优先用随附 Chromium）
 ├── knowledge-base/          # RAG 知识库
+├── assets/                  #  README/Release 引用的图片资源（捐赠二维码等）
+├── demo/                    # 运行演示截图（README「运行演示」引用）
 ├── webview2_runtime/        # 固定版本 WebView2 运行时（从本机已装目录复制，约 500MB，不入版本库，随安装包分发）
 ├── sign.ps1                 # 代码签名脚本（可选增强，默认跳过；需真实 CA 证书）
 ├── GoofishMasterDesktop.spec      # PyInstaller 打包配置（已含 app.ico）
@@ -261,6 +265,8 @@ GoofishMasterDesktop/
 | AI 分析失败 | 检查 `config.json` 的 `ai.deepseek_api_key`；境外模型需配 `ai.proxy_url` |
 | 飞书收不到消息 | 检查 `feishu.app_id/app_secret`；看日志长连接是否建立 |
 | 端口被占 | 改 `config.json` 的 `ports.*` 或安装时填新端口 |
+| 搜索一直「未找到符合条件的商品」 | 绝大多数是**未登录闲鱼**：到管理后台「🐟 闲鱼登录」扫码登录后再搜；已登录仍失败会如实显示「采集失败：…」，按日志排查 |
+| 监控任务创建后无反馈 | 确认安装的是 2026-08-05 后的安装包（早期测试版存在 SQLite 持久化被误关的问题，已修复） |
 
 ## 技术栈
 
@@ -281,7 +287,7 @@ GoofishMasterDesktop/
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/master/assets/donate-wechat.png) | ![支付宝收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/master/assets/donate-alipay.jpg) |
+| ![微信收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/main/assets/donate-wechat.png) | ![支付宝收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/main/assets/donate-alipay.jpg) |
 
 ## 发行说明
 

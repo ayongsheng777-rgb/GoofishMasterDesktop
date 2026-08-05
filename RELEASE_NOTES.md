@@ -25,15 +25,23 @@
 - **环境检测卡片**：安装/启动前直观显示 WebView2 Runtime 与 Chromium 是否就绪
 
 ### 🔧 安装与依赖（本版重点改进）
-- **WebView2 改用随附离线完整安装器（约 200MB，已内置）**：安装时**全程无需联网**，彻底摆脱在线依赖。若系统缺失 WebView2，安装末尾会自动请求管理员权限静默安装（你点「是」即可；如果点「否」也不会中断软件本身安装，只是桌面窗口需要它才能开）
+- **WebView2 固定版本运行时随包分发（约 500MB，已内置）**：桌面窗口渲染完全离线、免 UAC、不依赖系统是否预装 WebView2 Runtime，版本锁定更稳定
 - **修复安装报错 `IPersistFile::Save failed; code 0x80070005 拒绝访问`**：旧版安装器会尝试在所有用户桌面建快捷方式，因非提权而在部分机器上失败；本版改为当前用户桌面，不再报错
 - 默认安装到 `D:\GoofishMasterDesktop`（可改），端口可在安装时自定义（默认 8911/8912/8913/8914，均仅绑定 127.0.0.1 本机）
+
+### 🐞 实测修复（2026-08-05 刷新，真机验证通过）
+- **监控任务无法创建 / 一直无反馈**：修复 SQLite 持久化被误关、排除关键词列表入库失败两处问题
+- **搜索重启后任务中心消失**：搜索记录改为落盘持久化
+- **搜索时区崩溃**：修复 Windows 下 `Asia/Shanghai` 时区数据缺失导致采集全灭
+- **采集失败被误报为「未找到商品」**：未登录会明确提示去扫码；采集异常如实显示失败原因
+- **任务中心「已发现数量」恒为 0、飞书「停止/删除/设置」提示找不到任务**：修复 PG→SQLite 参数绑定错位（系统性）
+- **模型配置重启后丢失 / 飞书扫码需点两次 / 验证器显示旧名 / 桌面窗口图标崩溃** 等一并修复
 
 ---
 
 ## 安装步骤
 
-1. 下载 `GoofishMasterDesktop-Setup-1.0.0.exe`（约 509MB，含全部依赖与离线安装器）
+1. 下载 `GoofishMasterDesktop-Setup-1.0.0.exe`（约 580MB，含全部依赖、随附 Chromium 与固定版 WebView2 运行时）
 2. 双击运行安装包
 3. 若 Windows SmartScreen 弹出「Windows 已保护你的电脑」——**这是正常的**（见下方已知问题）；点「更多信息」→「仍要运行」即可
 4. 选择安装路径、设置端口，勾选「创建桌面快捷方式」
@@ -46,8 +54,8 @@
 ## ⚠️ 已知问题 / 待反馈
 
 - **未做代码签名**：当前为测试版，安装包与主程序**没有数字签名**，Windows SmartScreen 会拦截/告警。点「仍要运行」即可，不影响功能。正式签名将在后续版本（购买 CA 证书后）加入。
-- **GUI 尚未在多台真实机器实测**：桌面窗口渲染、托盘、WebView2 兼容性建议在你的机器上验证；如有「双击无窗口 / 闪退」，请把 `data/logs/desktop-crash.log` 内容反馈给我。
-- **体积较大**：因内置 Chromium + WebView2 离线器，安装包约 509MB，暂未做瘦身（后续可换 `--onefile` 或分离运行时）。
+- **体积较大**：因内置 Chromium + 固定版 WebView2 运行时，安装包约 580MB，暂未做瘦身（后续可换 `--onefile` 或分离运行时）。
+- **首次使用必须先登录闲鱼**：搜索/监控依赖闲鱼登录态，请到管理后台「🐟 闲鱼登录」扫码，否则搜索会提示未登录。
 - **飞书推送需自建应用**：本项目不提供飞书机器人凭证，需你自己在飞书开放平台创建应用并填入 `app_id / app_secret`。
 - **AI 分析为调用外部大模型**：需自行配置 API Key；调用境外模型（如 Gemini）可能需要配置代理。
 
@@ -70,7 +78,7 @@
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/master/assets/donate-wechat.png) | ![支付宝收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/master/assets/donate-alipay.jpg) |
+| ![微信收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/main/assets/donate-wechat.png) | ![支付宝收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/main/assets/donate-alipay.jpg) |
 
 ---
 
@@ -88,8 +96,9 @@
 
 ## 校验信息
 
-- 版本：`v1.0.0-beta.1`
+- 版本：`v1.0.0-beta.1`（2026-08-05 刷新，含全部实测修复）
 - 安装包：`GoofishMasterDesktop-Setup-1.0.0.exe`
-- 大小：约 509 MB
+- 大小：约 580 MB（607,262,271 字节）
+- SHA-256：`63f85e6685ece9c81a4b6101aa221d1d2e57b5bf9c0ab4df26a771ee4d1e30b9`
 - 平台：Windows 10 / 11（x64）
 - 许可：MIT

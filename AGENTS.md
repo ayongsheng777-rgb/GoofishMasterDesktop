@@ -196,10 +196,10 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 ## 8. 已知限制 / 待办
 
-1. **spider 采集**：目标机需 `playwright install chromium`（约 150MB），本环境未装 → spider 暂不可用。
+1. **spider 采集**：安装包已随附 Playwright Chromium（rev 1234，`{app}\playwright-browsers`），离线可用；源码开发模式需 `playwright install chromium`。
 2. **完整 DB 能力**：P1 已默认全开（进程内 SQLite/fakeredis/Chroma），无需外部二进制；`backends.*.enabled=false` 才降级。
-3. **桌面 GUI 实测**：pywebview 需在 Windows 图形环境跑（无头环境自动跳过只启后端）。
-4. **打包成 .exe**：✅ 已完成（PyInstaller onedir，详见 §11/§13）。**安装包**：✅ 已完成（Inno Setup 6，`GoofishMasterDesktop.iss`，产物 `installer/GoofishMasterDesktop-Setup-1.0.0.exe`，详见 README.md）。
+3. **桌面 GUI 实测**：✅ 已通过（2026-08-05 晚真机安装最新安装包验证，全部功能正常，含 BUG-10 修复）。
+4. **打包成 .exe**：✅ 已完成（PyInstaller onedir，详见 §11/§13）。**安装包**：✅ 已完成（Inno Setup 6，`GoofishMasterDesktop.iss`，产物 `installer/GoofishMasterDesktop-Setup-1.0.0.exe` 约 580MB，2026-08-05 19:22 重建含 BUG-1~10 全部修复，详见 README.md）。
 5. **安全**：`secret_key` 明文存 `config.json`；未做配置加密。**代码签名**：已加入可选签名脚本 `sign.ps1`（默认跳过——无真实 CA 证书时自签名对发行零信任收益，故不产出自签名）。要真正消除 SmartScreen 拦截需购买 DigiCert/Sectigo/GlobalSign 等 CA 证书后启用（见 `sign.ps1` 头部说明）。
 6. **更新通道**：自动更新 / 增量升级未实现。2026-08-05 已评估三阶段方案：① 版本检查+更新提示（推荐先做，~50 行：desktop/api.py `check_update()` + UI 提示条）；② 后台下载+静默升级（`/VERYSILENT`，全量 ~1GB 下载浪费大）；③ 文件级增量更新（本项目 onedir+源码数据文件化，90% 更新只换 `_internal` 几个 .py，发布时出 hash 清单按 diff 下载，exe 变了才全量）——跳过②，目标 ①→③。
 7. **✅ 发布产物已刷新**：`release/GoofishMasterDesktop/`（`GoofishMasterDesktop.exe` 30.5 MB + `_internal/`，2026-08-04 重打包，已剔除内嵌 config）。
@@ -304,6 +304,15 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 **验证**：临时脚本全绿（已删）——乱序重排/重复展开/原生 `?` 回归/create_task 11 参数回归/found_count 0→7/按关键词 stop、update、delete 命中/不存在任务仍 404。
 
 **教训**：PG→SQLite 方言转换，参数绑定是最危险的暗坑——`$N` 乱序/重复在 PG 合法，简单替换 `?` 必错。新增含 `$N` 的 SQL 后必须想一遍「编号顺序 == 出现顺序吗？有重复引用吗？」
+
+---
+
+## 8.6 2026-08-05 晚 项目目录清理（保持纯净）
+
+- **已删除**：`.build/`（08-04 过期构建快照，此前保留的 dist_20260804_183919 已落后于 10 个 BUG 修复）、`build/`（PyInstaller 工作目录，可再生）、根 `__pycache__/`、`build_log.txt`/`build_p1.log`/`iscc_log.txt`（构建日志）、`edgeupd.json`/`edgeupd2.json`（WebView2 探测垃圾，preflight 会再生）。
+- **`.gitignore` 新增**：`demo_ppt/`、`demo_fe/`、`demo_promo/`（演示图生成脚本，本地营销素材工具，产出在项目外目录，不入库）。
+- **保留**：`dist/`（当前构建）、`release/`（当前发布产物）、`installer/`（最新安装包）、`webview2_runtime/`（约 500MB 随包运行时）、`data/`、`config/`、`demo/`（README 引用的演示截图，已入库）、`assets/`（捐赠二维码，已入库）。
+- **文档同步**：README 下载说明（约 580MB + 已含全部实测修复）、排障表新增「搜索未找到→先登录闲鱼」「监控无反馈→用新包」两行、目录结构补 `assets/`/`demo/`；RELEASE_NOTES/RELEASE_BODY 修正 WebView2 描述（固定版运行时替代离线安装器）、体积 509→580MB、新增实测修复清单与 SHA-256、捐赠图 URL 由 `master` 改 `main`（分支收敛后 master 已删，旧 URL 已失效）。
 
 ---
 
