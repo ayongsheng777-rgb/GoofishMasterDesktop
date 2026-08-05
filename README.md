@@ -4,6 +4,12 @@
 
 四个微服务（飞书智能体 / AI 路由 / 分析编排 / 采集服务）由统一编排器拉起、健康巡检并优雅关停，**零 Docker、零命令行、零外部数据库**——双击即用。所有数据存储（SQLite / fakeredis / Chroma）全部进程内嵌入式，随程序同级落盘。
 
+## 下载（测试版）
+
+> 当前为测试版（Beta）发布，安装包**未做数字签名**，Windows SmartScreen 可能弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」即可，不影响功能。
+
+- **GitHub Releases**：[v1.0.0-beta.1 安装包（约 509MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.0.0-beta.1)
+
 ## 特性
 
 - **双击即用**：PyInstaller 单 exe + Inno Setup 安装包，无需安装 Python / Docker / PostgreSQL / Redis / Qdrant
