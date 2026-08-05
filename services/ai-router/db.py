@@ -33,9 +33,12 @@ _COUNT_FILTER_RE = re.compile(
 )
 
 
+_PARAM_RE = re.compile(r"\$(\d+)")
+
+
 def _norm(sql: str) -> str:
+    """方言转换（$N 参数处理在 _bind，需同步重排 args；详见 agent-pipeline/db.py）。"""
     s = sql
-    s = re.sub(r"\$\d+", "?", s)
     s = re.sub(r"::\w+", "", s)
     s = re.sub(r"\bILIKE\b", "LIKE", s, flags=re.IGNORECASE)
     s = re.sub(r"\bEXCLUDED\b", "excluded", s, flags=re.IGNORECASE)
@@ -44,6 +47,22 @@ def _norm(sql: str) -> str:
     s = re.sub(r"\bCURRENT_DATE\b", "DATE('now')", s, flags=re.IGNORECASE)
     s = _COUNT_FILTER_RE.sub(r"SUM(CASE WHEN \1 THEN 1 ELSE 0 END) AS \2", s)
     return s
+
+
+def _bind(query: str, args: tuple) -> tuple:
+    """$N -> ? 并按出现顺序重排/复制参数（PG 编号引用 vs SQLite 位置绑定）。
+
+    无 $N 时原样返回（原生 ? 查询不受影响）。编号越界保持原样并告警。
+    """
+    order = [int(n) for n in _PARAM_RE.findall(query)]
+    sql = _norm(_PARAM_RE.sub("?", query)) if order else _norm(query)
+    if order and args:
+        if max(order) <= len(args):
+            args = tuple(args[i - 1] for i in order)
+        else:
+            logger.warning("DB bind: param index %d exceeds %d args | %s",
+                           max(order), len(args), query)
+    return sql, args
 
 
 _SCHEMA = """
@@ -101,7 +120,8 @@ async def execute(query: str, *args) -> int:
     if conn is None:
         return 0
     try:
-        cur = await conn.execute(_norm(query), args)
+        sql, bound = _bind(query, args)
+        cur = await conn.execute(sql, bound)
         await conn.commit()
         return cur.rowcount
     except Exception as e:
@@ -114,7 +134,8 @@ async def fetch(query: str, *args) -> list:
     if conn is None:
         return []
     try:
-        cur = await conn.execute(_norm(query), args)
+        sql, bound = _bind(query, args)
+        cur = await conn.execute(sql, bound)
         rows = await cur.fetchall()
         return [_row_to_dict(r) for r in rows]
     except Exception as e:
@@ -127,7 +148,8 @@ async def fetchrow(query: str, *args) -> Optional[dict]:
     if conn is None:
         return None
     try:
-        cur = await conn.execute(_norm(query), args)
+        sql, bound = _bind(query, args)
+        cur = await conn.execute(sql, bound)
         row = await cur.fetchone()
         return _row_to_dict(row)
     except Exception as e:
@@ -140,7 +162,8 @@ async def fetchval(query: str, *args) -> Any:
     if conn is None:
         return None
     try:
-        cur = await conn.execute(_norm(query), args)
+        sql, bound = _bind(query, args)
+        cur = await conn.execute(sql, bound)
         row = await cur.fetchone()
         if row is None:
             return None

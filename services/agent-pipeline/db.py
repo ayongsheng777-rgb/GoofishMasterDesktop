@@ -4,8 +4,8 @@
 原 asyncpg 驱动在桌面版默认禁用 PG，功能全部降级。P1 改为用进程内
 aiosqlite 文件库（DATA_DIR/goofish.db），零外部依赖、随 exe 同级落盘。
 
-为尽量少改调用方，这里做一层 SQL 方言转换（_norm）：
-  $1..$N        -> ?
+为尽量少改调用方，这里做一层 SQL 方言转换（_norm + _bind）：
+  $1..$N        -> ?（_bind 按出现顺序重排/复制参数，支持乱序与重复引用）
   ::jsonb/::text-> 去掉类型强转
   ILIKE         -> LIKE（SQLite LIKE 对 ASCII 大小写不敏感）
   EXCLUDED      -> excluded（SQLite 关键字）
@@ -53,9 +53,19 @@ _COUNT_FILTER_RE = re.compile(
 )
 
 
+_PARAM_RE = re.compile(r"\$(\d+)")
+
+
 def _norm(sql: str) -> str:
+    """SQL 方言转换（不含参数绑定——$N 的处理在 _bind，因为要同步重排 args）。
+
+    注意：$N -> ? 绝不能用简单 re.sub。PG 的 $N 是「编号引用」，可乱序
+    （found_count=found_count+$2 WHERE task_id=$1）可重复（ILIKE $2 出现
+    两次只传一份参数）；SQLite 的 ? 是「纯位置绑定」，第 i 个 ? 吃第 i 个
+    参数。直接替换会导致：乱序时参数错绑（found_count 永不更新）、重复时
+    占位符多于参数（bindings 数量不符直接报错，被吞后表现为"找不到任务"）。
+    """
     s = sql
-    s = re.sub(r"\$\d+", "?", s)
     s = re.sub(r"::\w+", "", s)                       # 去 ::jsonb / ::text
     s = re.sub(r"\bILIKE\b", "LIKE", s, flags=re.IGNORECASE)
     s = re.sub(r"\bEXCLUDED\b", "excluded", s, flags=re.IGNORECASE)
@@ -64,6 +74,23 @@ def _norm(sql: str) -> str:
     s = re.sub(r"\bCURRENT_DATE\b", "DATE('now')", s, flags=re.IGNORECASE)
     s = _COUNT_FILTER_RE.sub(r"SUM(CASE WHEN \1 THEN 1 ELSE 0 END) AS \2", s)
     return s
+
+
+def _bind(query: str, args: tuple) -> tuple:
+    """把 PG 风格 $N 参数转成 SQLite 位置绑定，并按出现顺序重排/复制参数。
+
+    返回 (标准化 SQL, 重排后的 args)。无 $N 时原样返回（原生 ? 查询不受影响）。
+    编号超出 args 长度时保持原样——让 sqlite 报错并进日志，而不是静默错绑。
+    """
+    order = [int(n) for n in _PARAM_RE.findall(query)]
+    sql = _norm(_PARAM_RE.sub("?", query)) if order else _norm(query)
+    if order and args:
+        if max(order) <= len(args):
+            args = tuple(args[i - 1] for i in order)
+        else:
+            logger.warning("DB bind: param index %d exceeds %d args | %s",
+                           max(order), len(args), query)
+    return sql, args
 
 
 # ---------- DDL（原 Docker 项目 init.sql 未移植，这里从查询反推手写） ----------
@@ -212,7 +239,8 @@ async def execute(query: str, *args) -> int:
     if conn is None:
         return 0
     try:
-        cur = await conn.execute(_norm(query), _serialize_args(args))
+        sql, bound = _bind(query, _serialize_args(args))
+        cur = await conn.execute(sql, bound)
         await conn.commit()
         return cur.rowcount
     except Exception as e:
@@ -225,7 +253,8 @@ async def fetch(query: str, *args) -> list:
     if conn is None:
         return []
     try:
-        cur = await conn.execute(_norm(query), _serialize_args(args))
+        sql, bound = _bind(query, _serialize_args(args))
+        cur = await conn.execute(sql, bound)
         rows = await cur.fetchall()
         return [_row_to_dict(r) for r in rows]
     except Exception as e:
@@ -238,7 +267,8 @@ async def fetchrow(query: str, *args) -> Optional[dict]:
     if conn is None:
         return None
     try:
-        cur = await conn.execute(_norm(query), _serialize_args(args))
+        sql, bound = _bind(query, _serialize_args(args))
+        cur = await conn.execute(sql, bound)
         row = await cur.fetchone()
         return _row_to_dict(row)
     except Exception as e:
@@ -251,7 +281,8 @@ async def fetchval(query: str, *args) -> Any:
     if conn is None:
         return None
     try:
-        cur = await conn.execute(_norm(query), _serialize_args(args))
+        sql, bound = _bind(query, _serialize_args(args))
+        cur = await conn.execute(sql, bound)
         row = await cur.fetchone()
         if row is None:
             return None

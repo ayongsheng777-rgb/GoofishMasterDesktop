@@ -287,6 +287,26 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 ---
 
+## 8.5 2026-08-05 BUG-10：PG `$N` 参数简单替换导致绑定错位（系统性）
+
+**现象**：① 任务中心监控任务「已发现数量」永远为 0；② 飞书发「停止 xxx」「删除 xxx」一律提示「找不到监控任务」（「设置」指令同病）。
+
+**根因**：`db.py` 的 `_norm` 用 `re.sub(r"\$\d+", "?")` 把 PG 参数转成 SQLite 占位符，**但不重排参数**。PG 的 `$N` 是编号引用（可乱序、可重复），SQLite 的 `?` 是纯位置绑定（第 i 个 ? 吃第 i 个参数）：
+
+| 位置 | SQL | 后果 |
+|------|-----|------|
+| `monitor.py:419` found_count | `SET found_count=found_count+$2 WHERE task_id=$1`（args: tid, notified） | 第 1 个 `?` 错绑 tid（字符串→数值强转 0），第 2 个错绑 notified → WHERE 永不命中 → **found_count 永远不更新** |
+| `monitor.py:112` stop_task / `:153` delete_task | `task_id=$1 OR name ILIKE $2 OR keyword ILIKE $2`（2 个 args，3 个占位符） | sqlite 绑定时抛 Incorrect number of bindings → 被 fetchrow 吞掉返回 None → **404「未找到匹配的监控任务」** |
+| `monitor.py:137` update_task | `... WHERE task_id=$n-1 OR name ILIKE $n OR keyword ILIKE $n` | 同上，飞书「设置」指令同病 |
+
+**修法（系统性，非逐条改 SQL）**：`agent-pipeline/db.py` 新增 `_bind(query, args)`——先按 `$N` **出现顺序**展开为 `?`，再按编号重排/复制 args（`$2,$1` → args 换序；`$2` 出现两次 → args 复制一份）；编号越界时保持原样并告警（让 sqlite 报错进日志，不静默错绑）。`_norm` 不再碰 `$N`。execute/fetch/fetchrow/fetchval 四个入口统一走 `_bind`。`ai-router/db.py` 同步镜像（当前无 `$N` 查询，防御性对齐）。
+
+**验证**：临时脚本全绿（已删）——乱序重排/重复展开/原生 `?` 回归/create_task 11 参数回归/found_count 0→7/按关键词 stop、update、delete 命中/不存在任务仍 404。
+
+**教训**：PG→SQLite 方言转换，参数绑定是最危险的暗坑——`$N` 乱序/重复在 PG 合法，简单替换 `?` 必错。新增含 `$N` 的 SQL 后必须想一遍「编号顺序 == 出现顺序吗？有重复引用吗？」
+
+---
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。
