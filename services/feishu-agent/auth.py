@@ -16,6 +16,9 @@ DATA_DIR = Path(os.environ.get("DATA_DIR")
                 or Path(__file__).resolve().parents[2] / "data" / "feishu-agent")
 AUTH_FILE = DATA_DIR / "auth_config.json"
 
+# 验证器（Google Authenticator / 腾讯云验证器等）扫码后显示的发行方名称
+APP_DISPLAY_NAME = "GoofishMasterDesktop"
+
 # Session storage: token -> {"created": float, "expires": float}（内存兜底）
 _sessions: Dict[str, Dict[str, float]] = {}
 SESSION_DURATION = 86400  # 24 hours
@@ -184,7 +187,7 @@ def generate_totp_secret() -> str:
     return pyotp.random_base32()
 
 
-def get_totp_uri(secret: str, issuer: str = "AI-Goofish-V2") -> str:
+def get_totp_uri(secret: str, issuer: str = APP_DISPLAY_NAME) -> str:
     """Get TOTP provisioning URI for QR code."""
     import pyotp
     totp = pyotp.TOTP(secret)

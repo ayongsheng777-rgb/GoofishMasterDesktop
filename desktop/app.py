@@ -97,6 +97,9 @@ def run():
         url = ui_path.as_uri()  # file:// 绝对路径，WebView2 可直接加载
         log.warning("[desktop] stage=ui_path=%s", ui_path)
 
+        # 品牌图标：优先用打包进 _internal 的 app.ico（多尺寸），缺失时回退 logo-256.png
+        icon_path = cfg_mod.ROOT / "app.ico"
+
         api = Api()
         window = webview.create_window(
             "GoofishMasterDesktop · 桌面控制台",
@@ -105,6 +108,7 @@ def run():
             width=1180,
             height=760,
             min_size=(900, 600),
+            icon=str(icon_path) if icon_path.exists() else None,
         )
         log.warning("[desktop] stage=window_created")
 
@@ -125,13 +129,14 @@ def run():
         except Exception:
             pass
 
-        # 托盘图标
-        logo = cfg_mod.ROOT / "services" / "feishu-agent" / "static" / "logo-256.png"
+        # 托盘图标：优先 app.ico（与 exe / 安装器统一品牌），缺失回退 logo-256.png
         icon_img = None
-        if logo.exists():
+        for cand in (icon_path, cfg_mod.ROOT / "services" / "feishu-agent" / "static" / "logo-256.png"):
             try:
                 import PIL.Image
-                icon_img = PIL.Image.open(logo)
+                if cand and Path(cand).exists():
+                    icon_img = PIL.Image.open(cand)
+                    break
             except Exception:
                 icon_img = None
 
