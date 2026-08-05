@@ -201,7 +201,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 3. **桌面 GUI 实测**：pywebview 需在 Windows 图形环境跑（无头环境自动跳过只启后端）。
 4. **打包成 .exe**：✅ 已完成（PyInstaller onedir，详见 §11/§13）。**安装包**：✅ 已完成（Inno Setup 6，`GoofishMasterDesktop.iss`，产物 `installer/GoofishMasterDesktop-Setup-1.0.0.exe`，详见 README.md）。
 5. **安全**：`secret_key` 明文存 `config.json`；未做配置加密。**代码签名**：已加入可选签名脚本 `sign.ps1`（默认跳过——无真实 CA 证书时自签名对发行零信任收益，故不产出自签名）。要真正消除 SmartScreen 拦截需购买 DigiCert/Sectigo/GlobalSign 等 CA 证书后启用（见 `sign.ps1` 头部说明）。
-6. **更新通道**：自动更新 / 增量升级未实现。
+6. **更新通道**：自动更新 / 增量升级未实现。2026-08-05 已评估三阶段方案：① 版本检查+更新提示（推荐先做，~50 行：desktop/api.py `check_update()` + UI 提示条）；② 后台下载+静默升级（`/VERYSILENT`，全量 ~1GB 下载浪费大）；③ 文件级增量更新（本项目 onedir+源码数据文件化，90% 更新只换 `_internal` 几个 .py，发布时出 hash 清单按 diff 下载，exe 变了才全量）——跳过②，目标 ①→③。
 7. **✅ 发布产物已刷新**：`release/GoofishMasterDesktop/`（`GoofishMasterDesktop.exe` 30.5 MB + `_internal/`，2026-08-04 重打包，已剔除内嵌 config）。
 8. **🧹 遗留构建产物清理：✅ 已完成（2026-08-04 用户授权，逐项删除并验证）**：
    - `release/goofish-server/`、`dist/goofish-server/` —— 改名前的旧产物（曾内嵌本机 `secret_key`，见 §8.1 BUG-6），**已删除**；
@@ -267,6 +267,25 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 ---
 
+## 8.4 2026-08-05 发布链路断裂修复 + 分支收敛
+
+**背景**：BUG-8 修复（15:27）晚于 beta.1 安装包编译（14:58），此后安装包本地副本与 GitHub asset 均被删除，重打包流程中断——README 下载链接实际无文件可下。
+
+| # | 问题 | 修法 |
+|---|------|------|
+| 1 | GitHub Release v1.0.0-beta.1 assets 为空（README 链接失效） | 重新编译安装包并 curl 直传 |
+| 2 | `release/` 产物停留在 14:46（缺 BUG-8 修复），而 `.iss` 打包源正是 `release/` | `dist/`（15:57 含全部修复）同步覆盖 `release/` 的 exe + `_internal`（robocopy /MIR），`playwright-browsers/` 保留复用 |
+| 3 | `release/` 残留本地运行生成的 `config/config.json`（含 secret_key）+ `data/` | 删除（⚠️ `Remove-Item -Recurse` 在本机会被安全删除**静默拦截**——exit 0 但实际没删，必须删完用 `ls` 复核；单文件删除不受限） |
+| 4 | `.iss` 的 `WebView2Path`/`ResultCode` 死变量（方案 B 切换残留，iscc Hint 警告） | 已删 |
+| 5 | 根目录 `edgeupd.json`/`edgeupd2.json`（WebView2 探测垃圾）、`build_p1.log` | 已删；`.gitignore` 补 `*_log.txt`、`edgeupd*.json` |
+| 6 | GitHub 存在 main + master 两分支且分叉（本地分支曾是 master 并推 master；main 有 PR#1 合并提交） | 本地提交推 master → API merge master→main → 删远程 master → 本地改名 main 跟踪 origin/main。**此后只有 main** |
+| 7 | 桌面控制台「关于」弹层缺项目地址 | 新增 GitHub 链接：`desktop/api.py` `open_github()`（webbrowser 系统浏览器打开，避免 pywebview 内导航）+ `index.html` 链接 + `app.js` 绑定（`e.preventDefault()`） |
+| 8 | README 过时文案：509MB（实际 ~600MB）、WebView2 离线安装器静默装（方案 A 残留，已改方案 B 固定版运行时随包）、build-assets 目录描述 | 已同步修正 |
+
+**产物同步纪律（本次教训）**：改完源码后发布链路 = `改源码 → cp 数据文件到 dist（或重跑 PyInstaller）→ dist 同步 release（exe+_internal，保留 playwright-browsers）→ iscc → curl 上传`。任何一环断了，GitHub 上的安装包就不是最新代码。
+
+---
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。
@@ -291,6 +310,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 - 工作目录：`D:\WorkBuddy\GoofishMasterDesktop`。
 - GitHub：`ayongsheng777-rgb/GoofishMasterDesktop`（Private）
+- **唯一分支 `main`**（2026-08-05 起 master 已合并入 main 并删除，本地分支同步改名；此前本地 master 推远程导致两分支分叉的坑勿再踩）。
 - `.venv/`、`config/config.json`、`data/`、`build/`、`dist/`、`release/`、`installer/` 已 gitignore。
 - git 邮箱用 noreply 隐私保护：`277914440+ayongsheng777-rgb@users.noreply.github.com`
 - `git push` **走代理**（GitHub 属境外服务，本机直连不通）：push 前 `git config --global http.proxy http://127.0.0.1:1080 && git config --global https.proxy http://127.0.0.1:1080`，再 `git push`；API 调用（curl/Python）同理可用代理。

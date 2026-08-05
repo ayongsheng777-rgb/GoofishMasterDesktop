@@ -8,7 +8,7 @@
 
 > 当前为测试版（Beta）发布，安装包**未做数字签名**，Windows SmartScreen 可能弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」即可，不影响功能。
 
-- **GitHub Releases**：[v1.0.0-beta.1 安装包（约 509MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.0.0-beta.1)
+- **GitHub Releases**：[v1.0.0-beta.1 安装包（约 600MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.0.0-beta.1)
 
 ## 特性
 
@@ -79,7 +79,7 @@ feishu-agent        ai-router     agent-pipeline  spider-service
 > **安装包已内置全部运行依赖**：
 > - 全部 Python 依赖（chromadb / fakeredis / aiosqlite 等），无需安装 Python
 > - **Playwright Chromium（rev 1234）随安装包分发**，落在 `{app}\playwright-browsers`，采集服务离线即可用，无需系统安装 Chrome/Edge
-> - 若目标机缺失 **WebView2 Runtime**，安装包会在安装末尾**自动调用随附的离线完整安装器静默安装**（**无需联网**；该安装器约 200MB，已随安装包打包；Windows 10/11 一般已自带，纯离线机也能装）
+> - **固定版本 WebView2 运行时随包携带**（落在 `{app}\webview2_runtime`，程序启动自动优先使用）——完全不依赖系统 WebView2 Runtime，免 UAC、免联网，目标机不装任何运行时也能打开桌面窗口
 
 ### 前置依赖检测
 
@@ -242,10 +242,10 @@ GoofishMasterDesktop/
 │   ├── agent-pipeline/      # 编排 + 决策打分
 │   └── spider-service/      # 闲鱼采集（优先用随附 Chromium）
 ├── knowledge-base/          # RAG 知识库
-├── build-assets/            # 安装包构建资源（WebView2 离线完整安装器，约 200MB，从官方下载，不入版本库）
+├── webview2_runtime/        # 固定版本 WebView2 运行时（从本机已装目录复制，约 500MB，不入版本库，随安装包分发）
 ├── sign.ps1                 # 代码签名脚本（可选增强，默认跳过；需真实 CA 证书）
 ├── GoofishMasterDesktop.spec      # PyInstaller 打包配置（已含 app.ico）
-├── GoofishMasterDesktop.iss       # Inno Setup 安装包脚本（含 WebView2 自动装 + 随附 Chromium）
+├── GoofishMasterDesktop.iss       # Inno Setup 安装包脚本（随附固定版 WebView2 运行时 + Chromium）
 ├── config.example.json      # 配置示例
 └── requirements.txt         # Python 依赖
 ```
@@ -254,7 +254,7 @@ GoofishMasterDesktop/
 
 | 现象 | 处理 |
 |------|------|
-| 双击 exe 无窗口 | 缺少 WebView2 Runtime；安装包会自动调用随附的离线安装器静默安装（无需联网）；若 UAC 被拒则按提示手动装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
+| 双击 exe 无窗口 | 安装包已随附固定版 WebView2 运行时（无需系统安装）；仍异常则看 `data/logs/desktop-crash.log`，或手动装 [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) |
 | 双击闪退 | 看 `data/logs/desktop-crash.log`；命令行 `GoofishMasterDesktop.exe start` 确认服务端是否能起 |
 | 8911 打不开 WebUI | 看 `data/logs/feishu-agent.log`；确认服务已启动 |
 | 采集失败 | 安装包版已随附 Chromium，检查「环境检测」卡片 Chromium 状态；开发模式需 `playwright install chromium` |
