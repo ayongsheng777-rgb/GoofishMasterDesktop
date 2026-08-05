@@ -60,7 +60,7 @@
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/main/assets/donate-wechat.png) | ![支付宝收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/main/assets/donate-alipay.jpg) |
+| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0-beta.1/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0-beta.1/donate-alipay.jpg) |
 
 ---
 
