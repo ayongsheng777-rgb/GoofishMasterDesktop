@@ -118,3 +118,11 @@ class Api:
             webbrowser.open(url)
         except Exception:
             pass
+
+    def open_github(self) -> None:
+        """用系统默认浏览器打开项目 GitHub 仓库页。"""
+        try:
+            import webbrowser
+            webbrowser.open("https://github.com/ayongsheng777-rgb/GoofishMasterDesktop")
+        except Exception:
+            pass

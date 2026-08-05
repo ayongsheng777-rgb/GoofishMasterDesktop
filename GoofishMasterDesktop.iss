@@ -112,8 +112,6 @@ var
   ConfigDir: String;
   Content: String;
   P1, P2, P3, P4: Integer;
-  WebView2Path: String;
-  ResultCode: Integer;
 begin
   if CurStep = ssPostInstall then
   begin

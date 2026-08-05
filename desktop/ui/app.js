@@ -177,6 +177,11 @@ function bindEvents() {
   el("openData").addEventListener("click", () => api.open_data_dir());
   el("openFrontend").addEventListener("click", () => api.open_frontend());
   el("aboutBtn").addEventListener("click", () => el("aboutModal").classList.remove("hidden"));
+  el("githubLink").addEventListener("click", (e) => {
+    e.preventDefault();
+    if (api) api.open_github();
+    else window.open("https://github.com/ayongsheng777-rgb/GoofishMasterDesktop", "_blank");
+  });
 }
 
 // ---------- 启动 ----------
