@@ -57,6 +57,12 @@
 
 ---
 
+## 致谢
+
+本项目参考并借用了 [Usagi-org/ai-goofish-monitor](https://github.com/Usagi-org/ai-goofish-monitor)（闲鱼智能监控系统，MIT 许可证）的部分代码与设计思路，特此注明。特别感谢原作者 **Usagi** 的开源贡献——这是一个基于 Playwright + 多模态 AI 的闲鱼实时监控与分析系统，后台 UI 完善、功能扎实，是同类项目里做得相当出色的一个；本桌面端的本地化思路也从中受益良多。郑重致谢，也推荐有 Docker 条件的朋友去原项目点 Star ⭐ 支持。
+
+---
+
 完整发行说明见仓库 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
 **校验信息**：版本 `v1.0.0-beta.1` · 安装包 `GoofishMasterDesktop-Setup-1.0.0.exe` · 约 509 MB · Windows 10/11 x64 · 许可 Private
