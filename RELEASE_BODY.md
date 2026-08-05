@@ -53,7 +53,7 @@
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](assets/donate-wechat.png) | ![支付宝收款](assets/donate-alipay.jpg) |
+| ![微信收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/master/assets/donate-wechat.png) | ![支付宝收款](https://raw.githubusercontent.com/ayongsheng777-rgb/GoofishMasterDesktop/master/assets/donate-alipay.jpg) |
 
 ---
 
