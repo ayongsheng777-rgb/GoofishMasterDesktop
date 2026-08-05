@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Optional
 
 
@@ -100,26 +102,64 @@ def _cookie_changed(
 
 
 class _FileLock:
+    """跨进程文件锁：Unix 用 fcntl.flock；Windows 用 msvcrt.locking。
+
+    注意：Windows 下锁的是文件字节区间，且【锁随句柄关闭而释放】——因此
+    _update_task 在持有锁句柄期间绝不能 os.replace 该文件（WinError 5），
+    参见 _update_task 的读写分离实现。
+    """
+
     def __init__(self, fh):
         self._fh = fh
 
     def __enter__(self):
         try:
-            import fcntl
+            if os.name == "nt":
+                import msvcrt
 
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX)
         except Exception:
             pass
         return self
 
     def __exit__(self, exc_type, exc, tb):
         try:
-            import fcntl
+            if os.name == "nt":
+                import msvcrt
 
-            fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
+                self._fh.seek(0)
+                msvcrt.locking(self._fh.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self._fh.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
         return False
+
+
+def _default_state_path() -> str:
+    """默认状态文件路径：DATA_DIR 感知，兜底落在项目内（与 launcher 注入一致）。
+
+    旧版默认 "logs/task-failure-guard.json" 是相对【当前工作目录】的——桌面端
+    CWD 不可控（安装到 Program Files 时不可写），2026-08-05 改为绝对路径。
+    """
+    data_dir = os.getenv("DATA_DIR")
+    if data_dir:
+        return str(Path(data_dir) / "logs" / "task-failure-guard.json")
+    # 与 spider-service/main.py 的 DATA_DIR 兜底保持一致：项目根/data/spider
+    return str(Path(__file__).resolve().parents[3] / "data" / "spider" / "logs" / "task-failure-guard.json")
+
+
+# 进程内写串行锁。旧版用 fcntl.flock 做跨进程锁，但 Windows 无 fcntl 模块
+# （ImportError 被静默吞掉 => 实际无锁），故仅保证进程内串行；跨进程并发写
+# 由「唯一 tmp 名 + os.replace 原子性 + 重试」容忍（最坏丢一条计数，可接受）。
+_PROCESS_LOCK = threading.Lock()
 
 
 def _ensure_parent_dir(path: str) -> None:
@@ -147,12 +187,28 @@ def _read_json_file(path: str) -> dict:
 
 def _atomic_write_json(path: str, data: dict) -> None:
     _ensure_parent_dir(path)
-    tmp = f"{path}.tmp"
+    # tmp 名唯一化：避免多进程/多线程并发写同一 tmp 互相截断。
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.{int(time.time() * 1000)}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)
+    # Windows 上杀软/搜索索引可能短暂占用目标文件导致 WinError 5，退避重试。
+    last_err: Optional[OSError] = None
+    for delay in (0, 0.1, 0.3, 1.0):
+        if delay:
+            time.sleep(delay)
+        try:
+            os.replace(tmp, path)
+            return
+        except OSError as e:
+            last_err = e
+    # 最终失败：尽力清理 tmp 后抛出（由调用方决定是否兜底）。
+    try:
+        os.unlink(tmp)
+    except OSError:
+        pass
+    raise last_err  # type: ignore[misc]
 
 
 @dataclass(frozen=True)
@@ -176,7 +232,7 @@ class FailureGuard:
         self.path = (
             path
             or os.getenv("TASK_FAILURE_GUARD_PATH")
-            or "logs/task-failure-guard.json"
+            or _default_state_path()
         )
         self.threshold = max(
             1, threshold or _as_int(os.getenv("TASK_FAILURE_THRESHOLD"), 3)
@@ -199,19 +255,42 @@ class FailureGuard:
         _atomic_write_json(self.path, data)
 
     def _update_task(self, task_key: str, updater) -> dict:
+        """读-改-写一个任务条目。
+
+        Windows 修复（2026-08-05，WinError 5）：旧实现以 `open(self.path, "a+")`
+        持有目标文件句柄，在句柄未关闭时调用 `_save` → `os.replace(tmp, path)`，
+        Windows 不允许替换被打开（无 FILE_SHARE_DELETE）的文件 → WinError 5 拒绝访问。
+        现改为读写分离：锁内仅读取并随即关闭句柄，写盘时不再持有目标文件。
+        跨进程读改写存在窄竞态窗口（读后再写），由 replace 原子性兜底，最坏丢失
+        一条并发计数——对本「尽力记录」场景可接受。
+        """
         _ensure_parent_dir(self.path)
-        with open(self.path, "a+", encoding="utf-8") as fh:
-            with _FileLock(fh):
-                fh.seek(0)
-                data = self._load()
-                tasks = data.setdefault("tasks", {})
-                entry = tasks.get(task_key) or {}
-                if not isinstance(entry, dict):
-                    entry = {}
-                entry = updater(entry) or entry
-                tasks[task_key] = entry
-                self._save(data)
-                return entry
+        with _PROCESS_LOCK:
+            # 锁内读取（文件可能正被其他进程原子替换，msvcrt 锁降低读到半截的概率）
+            try:
+                with open(self.path, "a+", encoding="utf-8") as fh:
+                    with _FileLock(fh):
+                        fh.seek(0)
+                        try:
+                            data = json.load(fh)
+                            if not isinstance(data, dict):
+                                data = {}
+                        except Exception:
+                            data = self._load()
+            except FileNotFoundError:
+                data = {"version": 1, "tasks": {}}
+            # 句柄已关闭 —— 以下写盘不再持有目标文件
+            if "tasks" not in data or not isinstance(data.get("tasks"), dict):
+                data = {"version": 1, "tasks": {}}
+            data.setdefault("version", 1)
+            tasks = data["tasks"]
+            entry = tasks.get(task_key) or {}
+            if not isinstance(entry, dict):
+                entry = {}
+            entry = updater(entry) or entry
+            tasks[task_key] = entry
+            self._save(data)
+            return entry
 
     def record_success(self, task_key: str, *, now: Optional[datetime] = None) -> None:
         def _reset(_: dict) -> dict:
@@ -227,7 +306,12 @@ class FailureGuard:
                 "cookie_mtime": None,
             }
 
-        self._update_task(task_key, _reset)
+        try:
+            self._update_task(task_key, _reset)
+        except Exception as e:
+            # 记账是辅助能力，写盘失败绝不能搞挂采集主流程（2026-08-05 教训：
+            # WinError 5 从本模块冒泡，把真实采集失败原因掩盖成 guard 自身错误）
+            print(f"[FailureGuard] record_success 状态写入失败（已忽略）: {e}")
 
     def should_skip_start(
         self,
@@ -282,7 +366,10 @@ class FailureGuard:
                     e["last_notified_date"] = today
                     return e
 
-                self._update_task(task_key, _touch)
+                try:
+                    self._update_task(task_key, _touch)
+                except Exception as e:
+                    print(f"[FailureGuard] 通知标记写入失败（已忽略）: {e}")
 
             return SkipDecision(
                 skip=True,
@@ -365,5 +452,10 @@ class FailureGuard:
             result["consecutive_failures"] = consecutive
             return entry
 
-        self._update_task(task_key, _apply)
+        try:
+            self._update_task(task_key, _apply)
+        except Exception as e:
+            # 记账失败绝不搞挂主流程；保守放开通知，避免真实失败被静默
+            print(f"[FailureGuard] record_failure 状态写入失败（已忽略）: {e}")
+            result["should_notify"] = True
         return result
