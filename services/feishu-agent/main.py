@@ -170,7 +170,8 @@ async def _format_last_results(open_id: str) -> str:
 async def _dispatch_pipeline_search(keyword: str, open_id: str = "",
                                      max_price: Optional[int] = None,
                                      personal_only: bool = False,
-                                     exclude_keywords: Optional[list] = None) -> None:
+                                     exclude_keywords: Optional[list] = None,
+                                     max_pages: int = 1) -> None:
     """Dispatch a search request to the agent pipeline."""
     try:
         # pipeline 内部链路长（采集约4-8分钟+AI分析），超时给足；
@@ -182,6 +183,7 @@ async def _dispatch_pipeline_search(keyword: str, open_id: str = "",
                 "max_price": max_price,
                 "personal_only": personal_only,
                 "exclude_keywords": exclude_keywords or [],
+                "max_pages": max_pages,
             })
             data = resp.json()
             # pipeline 以 200 + success:False 返回业务失败（如采集超时），
@@ -537,12 +539,17 @@ async def handle_message(payload: dict) -> Optional[str]:
             max_price=cmd.get("max_price"),
             personal_only=cmd.get("seller_type") == "personal",
             exclude_keywords=cmd.get("exclude_keywords"),
+            max_pages=cmd.get("max_pages", 1),
         ))
 
+        max_pages = cmd.get("max_pages", 1)
+        page_text = f" {max_pages}页" if max_pages > 1 else ""
+        # 时间估算：单页约 8 分钟采 + 2 分钟分析，每多一页加 8 分钟
+        est_mins = 8 + (max_pages - 1) * 8 + 2
         return (f"🔍 已收到搜索请求\n"
-                f"关键词: {keyword}{cond_text}\n\n"
-                f"⏳ 全流程约 10-15 分钟：\n"
-                f"闲鱼采集（约8分钟）→ AI 三维分析（卖家/风险/价格）\n\n"
+                f"关键词: {keyword}{cond_text}{page_text}\n\n"
+                f"⏳ 全流程约 {est_mins} 分钟：\n"
+                f"闲鱼采集（约{8 if max_pages == 1 else f'{8}~{8 * max_pages}'}分钟）→ AI 三维分析（卖家/风险/价格）\n\n"
                 f"💡 采集完成会先收到进度通知，高分商品自动推送卡片\n"
                 f"期间可继续发送其他指令")
 

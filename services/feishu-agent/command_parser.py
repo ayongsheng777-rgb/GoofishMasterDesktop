@@ -49,7 +49,7 @@ def parse_command(text: str) -> Dict[str, Any]:
     # Search command（「收」是二手场景高频动词；负向预查挡住 收到/收好/收了 等闲聊）
     search_match = re.match(r'(?:找|搜索|查找|寻找|搜|收(?!到|好|了|下|藏|尾|工|音|费|税))\s*(.+?)(?:\s+要求|\s+条件|$)', text)
     if search_match:
-        keyword = search_match.group(1).strip()
+        keyword = _strip_page_suffix(search_match.group(1).strip())
         result = {"action": "search", "keyword": keyword}
         _parse_conditions(text, result)
         _extract_exclusions(text, result)
@@ -59,7 +59,7 @@ def parse_command(text: str) -> Dict[str, Any]:
     # Monitor command
     monitor_match = re.match(r'(?:监控|关注|盯着|订阅)\s*(.+?)(?:\s+低于|\s+要求|$)', text)
     if monitor_match:
-        keyword = monitor_match.group(1).strip()
+        keyword = _strip_page_suffix(monitor_match.group(1).strip())
         result = {"action": "monitor", "keyword": keyword}
         _parse_conditions(text, result)
         _extract_exclusions(text, result)
@@ -121,10 +121,11 @@ def parse_command(text: str) -> Dict[str, Any]:
     if len(text) > 1:
         if _looks_like_chatter(text):
             return {"action": "chatter", "text": text}
-        result = {"action": "search", "keyword": text}
+        keyword = _strip_page_suffix(text)
+        result = {"action": "search", "keyword": keyword}
         _parse_conditions(text, result)
         _extract_exclusions(text, result)
-        result["keyword"] = _clean_keyword(text, result)
+        result["keyword"] = _clean_keyword(keyword, result)
         return result
 
     return {"action": "help"}
@@ -156,6 +157,11 @@ def _looks_like_chatter(text: str) -> bool:
     if not has_alnum and len(text) < 4:
         return True
     return False
+
+
+def _strip_page_suffix(keyword: str) -> str:
+    """Remove trailing 'N页' from keyword so it doesn't pollute search terms."""
+    return re.sub(r'\s*\d+\s*[页頁]\s*$', '', keyword).strip()
 
 
 def _parse_conditions(text: str, result: Dict[str, Any]) -> None:
@@ -194,6 +200,16 @@ def _parse_conditions(text: str, result: Dict[str, Any]) -> None:
         result["exclude_mining"] = True
     if re.search(r'无维修|没修过', text):
         result["exclude_repair"] = True
+
+    # Page count（交互式搜索默认 1 页，用户可追加「3页」取更多）
+    page_match = re.search(r'(\d+)\s*[页頁]', text)
+    if page_match:
+        result["max_pages"] = _clamp_pages(int(page_match.group(1)))
+
+
+def _clamp_pages(n: int) -> int:
+    """Clamp page count to 1-10, warn if overridden."""
+    return max(1, min(n, 10))
 
 
 # 排除词并列连词：「不要主机或其它配件」「排除矿卡和维修机」需拆开，
@@ -339,6 +355,7 @@ def format_help() -> str:
 • 个人卖家 / 商家
 • 全新 / 二手
 • 无矿卡 / 无维修 / 不要X（配件/刷机/主机…，AI 自动扩展同义词）
+• N页 — 采集页数（默认1页/约30件，上限10页；每页+约8分钟）
 
 📋 管理指令：
 • 任务列表 — 查看所有任务
@@ -362,6 +379,7 @@ def format_help() -> str:
 
 💡 示例：
 • 找 RTX4090 个人卖家 价格8000以下
+• 找 笔记本电脑 3页 — 多页采集（每页约30件）
 • 收 b460主板 只要主板，不要主机或配件
 • 监控 Mac mini M4 低于5000
 • 结果列表"""
@@ -378,17 +396,19 @@ HELP_TOPICS = {
 高级组合：
 • 找 RTX4090 个人卖家 价格8000以下 无矿卡
 • 找 MacBook Pro 全新 价格5000-8000
+• 找 笔记本电脑 3页 — 采集多页（默认1页/约30件，上限10页）
 
 搜索流程：
 1. AI 提炼搜索关键词与排除词（理解反向语义，如「不要升级存储」→ 排除对应词）
-2. Spider 采集闲鱼商品
+2. Spider 采集闲鱼商品（每页约 30 件，约 8 分钟/页）
 3. AI 多维度分析（卖家/风险/价格）
 4. 按综合评分排序推送结果
 
 提示：
 • 关键词越具体，结果越精准
 • 可以组合多个条件缩小范围
-• 搜索结果是实时的，可能需要几分钟""",
+• 搜索结果是实时的，可能需要几分钟
+• 追加「N页」可采集更多结果（每多1页约+8分钟）""",
 
     "监控": """📡 监控任务详解
 

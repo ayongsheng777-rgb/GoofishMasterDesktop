@@ -2,7 +2,7 @@
 ; 生成安装包: ISCC.exe GoofishMasterDesktop.iss
 
 #define MyAppName "GoofishMasterDesktop"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.1.2"
 #define MyAppPublisher "GoofishMaster"
 #define MyAppExeName "GoofishMasterDesktop.exe"
 #define MyAppDescription "闲鱼圣手桌面独立运行端"

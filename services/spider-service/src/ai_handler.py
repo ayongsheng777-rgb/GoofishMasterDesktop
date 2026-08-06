@@ -2,9 +2,11 @@ import asyncio
 import base64
 import json
 import os
+import random
 import re
 import sys
 import shutil
+import time
 import traceback
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
@@ -12,10 +14,13 @@ from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 import requests
 
 # 设置标准输出编码为UTF-8，解决Windows控制台编码问题
+# 注意：必须用 TextIOWrapper 重新包装，绝不能 detach 底层 buffer——
+# detach 会撕裂 buffer，导致 uvicorn/logging 等持有旧引用写入时抛
+# ValueError: underlying buffer has been detached（日志崩塌，排查不可见）
 if sys.platform.startswith('win'):
-    import codecs
-    sys.stdout = codecs.getwriter('utf-8')(sys.stdout.detach())
-    sys.stderr = codecs.getwriter('utf-8')(sys.stderr.detach())
+    import io as _io
+    sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = _io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 from src.config import (
     AI_DEBUG_MODE,
@@ -295,6 +300,26 @@ async def send_ntfy_notification(product_data, reason):
     return results
 
 
+def _detect_rate_limit(exc: Exception) -> bool:
+    """Check if an exception was caused by API rate limiting / quota exhaustion."""
+    status = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    if status == 429:
+        return True
+    msg = str(exc).lower()
+    for marker in ("429", "rate limit", "rate_limit", "too many requests",
+                   "too_many_requests", "resource_exhausted", "quota"):
+        if marker in msg:
+            return True
+    return False
+
+
+def _rate_limit_sleep(consecutive_429: int) -> None:
+    """Exponential backoff for rate limits: 2^N + jitter, capped at 60s."""
+    delay = min((2 ** consecutive_429) + random.uniform(0, 2), 60.0)
+    safe_print(f"   [AI分析] ⚡ API 限流/额度不足，{delay:.1f}s 后退避重试...")
+    time.sleep(delay)
+
+
 async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
     """将完整的商品JSON数据和所有图片发送给 AI 进行分析（异步）。"""
     if not client:
@@ -373,6 +398,7 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
     api_mode = CHAT_COMPLETIONS_API_MODE
     use_response_format = ENABLE_RESPONSE_FORMAT
     use_temperature = True
+    consecutive_429 = 0
     for attempt in range(max_retries):
         try:
             # 根据重试次数调整参数
@@ -443,6 +469,19 @@ async def get_ai_analysis(product_data, image_paths=None, prompt_text=""):
                 raise e
 
         except Exception as e:
+            # --- 429 / 限流 / 额度不足：不切换 API 模式，退避后原参数重试 ---
+            if _detect_rate_limit(e):
+                consecutive_429 += 1
+                safe_print(
+                    f"   [AI分析] 第{attempt + 1}次尝试触发限流（连续{consecutive_429}次），"
+                    f"保持当前模型与参数。"
+                )
+                if attempt < max_retries - 1:
+                    _rate_limit_sleep(consecutive_429)
+                    continue
+                safe_print("   [AI分析] 限流次数已达上限，放弃本件。")
+                raise e
+            # --- API 兼容性降级（非 429 才走） ---
             if (
                 api_mode == CHAT_COMPLETIONS_API_MODE
                 and is_chat_completions_api_unsupported_error(e)

@@ -863,6 +863,7 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
     max_price = data.get("max_price")
     personal_only = data.get("personal_only", False)
     exclude_keywords = [k.lower() for k in (data.get("exclude_keywords") or []) if k]
+    max_pages = max(1, min(int(data.get("max_pages", 1)), 10))  # 用户可控，上限 10 页
 
     if not keyword:
         raise HTTPException(status_code=400, detail="关键词不能为空")
@@ -903,11 +904,11 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
     _search_ctl.update(keyword=keyword, phase="crawl", cancelled=False)
 
     # Step 1: Trigger spider search（V1 引擎逐商品抓详情，单页约 8 分钟）
-    # 注意：交互式搜索只用 1 页（约 30 条）——2 页实测 949s 会打穿 900s 超时
+    # 默认 1 页（约 30 条快速快照），用户可通过指令「3页」调整（上限 10 页）
     try:
         spider_data = await _spider_search_with_retry({
             "keyword": keyword,
-            "max_pages": 1,
+            "max_pages": max_pages,
             "personal_only": personal_only,
             "max_price": max_price,
             "ai_analysis": False,  # We'll do analysis ourselves
