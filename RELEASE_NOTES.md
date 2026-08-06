@@ -1,6 +1,6 @@
-# GoofishMasterDesktop 闲鱼圣手桌面端 v1.1.2 发行说明
+# GoofishMasterDesktop 闲鱼圣手桌面端 v1.1.3 发行说明
 
-> **v1.1.2 体验完善版**——修复日志崩塌、AI 限流退避，新增多页采集参数。
+> **v1.1.3 修复版**——修复 v1.1.2 重装包「Failed to start embedded python interpreter」启动失败，新增控制台更新提示。
 > 作者是一名线下电脑实体店店主，利用 WorkBuddy 在业余时间开发，欢迎试用并提出问题。
 
 ---
@@ -16,9 +16,18 @@
 
 ---
 
-## 🆕 v1.1.2 本次新增
+## 🆕 v1.1.3 本次新增
 
-- **修复日志崩塌**：`sys.stdout.detach()` 在采集时撕裂 uvicorn/logging buffer → 全程 `ValueError: underlying buffer has been detached` 报错噪音，排查不可见。改为 `io.TextIOWrapper` 安全包装。
+- **修复启动失败（关键）**：v1.1.2 期间重建的安装包混入了不同 Python 版本构建的 `base_library.zip`，引导即报 `Failed to start embedded python interpreter!` 无法启动。本版由项目专用 Python 3.13 环境全新干净构建，发布前已实机验证。**请勿使用 v1.1.2 安装包。**
+- **日志编码修复根治**：stdout UTF-8 重包装改为 `os.dup` 复制句柄后再包装——不撕裂底层 buffer、不接管宿主句柄所有权。
+- **新增更新提示**：桌面控制台启动时自动检查新版本，顶部提示条一键前往下载；检查失败静默不打扰。
+- 测试套件全绿：80 通过 / 0 失败。
+
+---
+
+## v1.1.2 已包含（安装包已撤回，请直接使用 v1.1.3）
+
+- **修复日志崩塌**：`sys.stdout.detach()` 在采集时撕裂 uvicorn/logging buffer → 全程 `ValueError: underlying buffer has been detached` 报错噪音，排查不可见。改为 `io.TextIOWrapper` 安全包装（v1.1.3 已进一步根治为 dup-fd 方案）。
 - **AI 429 退避机制**：API 限流时不再立即重试 ×4（连炸），改为指数退避（2^N + 随机抖动，上限 60s）+ 不降级 API 模式。
 - **多页采集参数**：支持 `找 笔记本电脑 3页` 语法（默认 1 页约 30 件，上限 10 页）。搜索确认回复动态显示预估耗时。
 - **使用说明更新**：条件筛选中新增「N页」条目与搜索示例。
@@ -110,9 +119,9 @@
 
 ## 校验信息
 
-- 版本：`v1.1.2`（2026-08-06 发布，体验完善版）
-- 安装包：`GoofishMasterDesktop-Setup-1.1.2.exe`
-- 大小：约 580 MB（583,982,382 字节）
-- SHA-256：`d49ae218697172b7ee46ad265c7f67fa09c1e2ffa4e33fb37c09e2a47dd46b62`
+- 版本：`v1.1.3`（2026-08-06 发布，修复版）
+- 安装包：`GoofishMasterDesktop-Setup-1.1.3.exe`
+- 大小：约 580 MB（608,449,715 字节）
+- SHA-256：`6d2e870f058b9f55e965499ab714fad9df67476e411c3cecf096b3eccacba5f6`
 - 平台：Windows 10 / 11（x64）
 - 许可：MIT

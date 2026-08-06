@@ -1,6 +1,6 @@
-# GoofishMasterDesktop 闲鱼圣手桌面端 v1.1.2
+# GoofishMasterDesktop 闲鱼圣手桌面端 v1.1.3
 
-> **v1.1.2 体验完善版**——修复日志崩塌、AI 限流退避，新增多页采集参数。
+> **v1.1.3 修复版**——修复 v1.1.2 重装包「Failed to start embedded python interpreter」启动失败，新增控制台更新提示。
 > 作者是一名线下电脑实体店店主，利用 WorkBuddy 在业余时间开发，欢迎试用并提出问题。
 
 ## 这是什么
@@ -12,16 +12,19 @@
 - 数据全嵌入式：SQLite（替代 PostgreSQL）、fakeredis（替代 Redis）、Chroma（替代 Qdrant）
 - 桌面控制台（pywebview + 系统托盘），双击即用
 
-## 🆕 v1.1.2 本次新增
+## 🆕 v1.1.3 本次新增
 
-- **修复日志崩塌**：蜘蛛爬虫的 `sys.stdout.detach()` 在采集时撕裂 uvicorn/logging 底层 buffer，导致全程日志全是 `ValueError: underlying buffer has been detached` 报错（几千行噪音覆盖真实采集进度，排查不可见）。已改为 `io.TextIOWrapper` 安全重包装。
-- **AI 429 退避机制**：API 限流 / 额度不足时不再立即重试 ×4 反复撞墙，改为指数退避（2^N + 随机抖动，上限 60s），避免限流风暴。管线层已有单品异常隔离，单件分析失败不会拖死整次搜索。
-- **多页采集参数**：飞书搜索指令支持追加「N页」，如 `找 笔记本电脑 3页` 可采集约 90 件商品（默认 1 页 / 约 30 件，上限 10 页）。搜索确认回复会动态显示预估耗时。全链路透传：命令解析 → 飞书代理 → 管线 → 蜘蛛。
-- **使用说明文档完善**：指令帮助中新增「N页」条件筛选说明与示例。
+- **修复启动失败（关键）**：v1.1.2 期间重建的安装包混入了不同 Python 版本构建的 `base_library.zip`，引导即报 `Failed to start embedded python interpreter!` 无法启动。本版由项目专用 Python 3.13 环境全新干净构建，安装前已实机验证启动。
+- **日志编码修复根治**：采集服务的 stdout UTF-8 重包装改为 `os.dup` 复制句柄后再包装——既不撕裂底层 buffer（旧 detach 问题），也不接管宿主句柄所有权（v1.1.2 写法在特定环境下会被回收时误关底层句柄）。
+- **新增更新提示**：桌面控制台启动时自动检查新版本，发现新版会在顶部显示提示条，一键前往下载；检查失败（断网/无代理）静默不打扰。
+- 测试套件全绿：80 通过 / 0 失败。
+
+> 已安装 v1.1.1 及更早版本的用户：直接运行本安装包覆盖安装即可，配置与数据（`config.json`、`data/`）不受影响。
+> **请勿使用 v1.1.2 安装包**（已撤回，存在启动缺陷）。
 
 ## 安装步骤
 
-1. 下载下方 `GoofishMasterDesktop-Setup-1.1.2.exe`（约 580MB）
+1. 下载下方 `GoofishMasterDesktop-Setup-1.1.3.exe`（约 580MB）
 2. 双击运行安装包
 3. 若 Windows SmartScreen 弹出「Windows 已保护你的电脑」——正常（见已知问题），点「更多信息」→「仍要运行」
 4. 选择路径、设端口，勾选「创建桌面快捷方式」
@@ -47,7 +50,7 @@
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.2/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.2/donate-alipay.jpg) |
+| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.3/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.3/donate-alipay.jpg) |
 
 ---
 
@@ -65,4 +68,4 @@
 
 完整发行说明见仓库 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-**校验信息**：版本 `v1.1.2`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.1.2.exe` · 约 580 MB（583,982,382 字节）· SHA-256 `d49ae218697172b7ee46ad265c7f67fa09c1e2ffa4e33fb37c09e2a47dd46b62` · Windows 10/11 x64 · 许可 MIT
+**校验信息**：版本 `v1.1.3`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.1.3.exe` · 约 580 MB（608,449,715 字节）· SHA-256 `6d2e870f058b9f55e965499ab714fad9df67476e411c3cecf096b3eccacba5f6` · Windows 10/11 x64 · 许可 MIT
