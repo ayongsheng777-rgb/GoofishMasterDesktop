@@ -343,6 +343,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **变异测试**：注入 4 处变异（spider 启动失败清理 / config 深合并退化 / launcher PATH 硬切 / logfilter 补丁关闭）→ 5 个测试变红，证明测试非自娱自乐；还原后 66 passed
 - `tests/manual_launch_check.py` → 4 服务全部 `/api/health/live` `alive` + `/api/health/ready` 正确 degraded/healthy；日志脱敏抽查「4 个日志文件未见明文凭据」✅
 - `py_compile` 全过
+- **v1.0.0 发布（2026-08-06）**：PyInstaller 重建 `release/GoofishMasterDesktop/`（保留 `playwright-browsers`，剥离 `config/`、`data/`），ISCC 生成 `installer/GoofishMasterDesktop-Setup-1.0.0.exe`（608,101,372 字节，SHA-256 `07a6b8e124434b7572a612b58e2656aabade1b29d005807269b508ded97244e1`），已推 `main` 并发布 GitHub Release `v1.0.0`（含安装包 + 两张捐赠二维码附件）。构建时**改用临时输出目录**（`%TEMP%\gmd_build`）绕开被拒的 `dist/` 删除，再同步进 `release/`。
 
 **端口冲突警示（本次踩坑）**：本机已安装的 `D:\GoofishMasterDesktop\GoofishMasterDesktop.exe`（pid 18888 + 4 个 `--service` 子进程）常驻占用 8911-8914，**不可触碰**。任何本地验证必须改用隔离端口（如 895x）。
 
