@@ -63,8 +63,10 @@ GoofishMasterDesktop/
 
 ## 3. 架构与端口
 
-启动顺序（launcher `SERVICES`）：`ai-router → feishu-agent → agent-pipeline → spider`。
-（spider 最后，因为它要调用前三者。）
+启动顺序由 `_SERVICE_DEFS` 的 `depends` 声明经拓扑排序得出（`launcher.py`）：
+`ai-router → agent-pipeline → spider-service → feishu-agent`。
+（feishu-agent 最后，因为它运行期会调用其余三者；`wait_health` 超时只告警
+不阻断，某服务未就绪不影响后续服务拉起，看门狗对各服务独立重启。）
 
 | 服务 | 端口 | 职责 | 依赖后端 | 关键注入环境变量 |
 |------|------|------|----------|------------------|
@@ -346,6 +348,29 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **v1.0.0 发布（2026-08-06）**：PyInstaller 重建 `release/GoofishMasterDesktop/`（保留 `playwright-browsers`，剥离 `config/`、`data/`），ISCC 生成 `installer/GoofishMasterDesktop-Setup-1.0.0.exe`（608,101,372 字节，SHA-256 `07a6b8e124434b7572a612b58e2656aabade1b29d005807269b508ded97244e1`），已推 `main` 并发布 GitHub Release `v1.0.0`（含安装包 + 两张捐赠二维码附件）。构建时**改用临时输出目录**（`%TEMP%\gmd_build`）绕开被拒的 `dist/` 删除，再同步进 `release/`。
 
 **端口冲突警示（本次踩坑）**：本机已安装的 `D:\GoofishMasterDesktop\GoofishMasterDesktop.exe`（pid 18888 + 4 个 `--service` 子进程）常驻占用 8911-8914，**不可触碰**。任何本地验证必须改用隔离端口（如 895x）。
+
+---
+
+## 8.8 2026-08-06 V1.1 稳定性增强（外部优化方案评估后实施）
+
+对一份外部优化方案逐条源码核实（评估报告：`D:\WorkBuddy\GoofishMasterDesktop-优化方案评估报告.md`），5 个"严重级 BUG"仅 1 个真实。实施清单：
+
+| # | 位置 | 改动 |
+|---|------|------|
+| 1 | `common/jobobject.py`（新增）+ `launcher.py` | **Windows Job Object 进程树保护**：ctypes 直调 `CreateJobObjectW`（匿名 Job，避免与常驻实例共享）+ `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`；`start_service` 对每个服务进程 `AssignProcessToProcessJobObject`。主程序被强杀/崩溃时内核级回收含 Chromium / Playwright node 驱动的整棵进程树。⚠️ **本机 WorkBuddy 沙箱按名拦截 `AssignProcessToProcessJobObject`**（系统/托管 Python 均缺该导出，疑 EDR 防 Job 逃逸）——模块初始化探测 `_API_AVAILABLE`，不可用时整体降级为无保护模式（旧行为），不阻断启动；沙箱内只能验证降级路径，功能路径需在真实桌面环境验证 |
+| 2 | `services/spider-service/src/scraper.py` | **采集浏览器复用池 `_ScrapeBrowserPool`**：池键=(proxy, channel, headless)，同参数任务共享单 browser 实例（此前每任务冷启动 Chromium 数秒）；每任务仍独立 context（cookie 隔离），结束只关 context；users 引用计数保证**使用中的实例绝不回收**；空闲 600s 无使用者由 sweeper 回收 browser+驱动；崩溃（`is_connected=False`）自动丢弃重建；`shutdown_scrape_browser_pool()` 挂到 main.py shutdown 钩子。扫码登录会话池是独立通道未动 |
+| 3 | 3 处 db 层 | 补 `PRAGMA synchronous=NORMAL`（WAL 已有，busy_timeout=20000 已有） |
+| 4 | `feishu-agent/templates/index.html` | AI 配置区明确「API Key/代理热生效，端口/并发需重启」；顺带**清除 Docker 残留文案**（代理占位符 `host.docker.internal`→`127.0.0.1:1080`，违反「界面不暴露 Docker 术语」产品定位） |
+| 5 | AGENTS.md §3 | 修正启动顺序文档漂移（旧文写 spider 最后，实际拓扑序 feishu-agent 最后） |
+
+**方案中被否决的条目**（防后人重复踩）：依赖拓扑"反向依赖"系误读（spider 运行时确实调 pipeline `/api/analyze/batch`，且 `wait_health` 不阻断）；Chroma 本就仅 ai-router 单进程访问；DPAPI/健康三态/seen_items 去重 v1.0.0 已完成；Chromium 自动更新违背离线设计；AI 优先级队列与 API Gateway 对单用户桌面端属过度设计。
+
+**新增测试**：`tests/test_jobobject.py`（6 项，功能项在 API 被拦截环境自动 skip）、`tests/test_scrape_browser_pool.py`（7 项，Fake 三件套）。**测试坑**：`src/ai_handler.py` 导入期 `sys.stdout.detach()` 会拆坏 pytest 捕获流，fixture 需用 `io.TextIOWrapper(io.BytesIO())` 替身流导入后还原。
+
+**同日追加（第二轮建议的增量实施）**：
+- **看门狗重启熔断**（`launcher.py`）：`_RESTART_WINDOW_SEC=600` 窗口内自动重启超 `_RESTART_MAX=5` 次 → 服务入 `_BROKEN` 停拉，`status()`/桌面控制台服务卡片显示「已熔断（重启超限）」（`desktop/api.py` 状态加 `broken` 字段）；手动 `restart_service` / `start_all` 清除熔断。防配置损坏类故障引发无限重启风暴。测试 `tests/test_watchdog_breaker.py`（5 项）。
+- **托盘菜单增强**（`desktop/app.py`）：新增「打开管理后台」（系统浏览器，端口随 config）与「查看日志」（资源管理器开 data/logs）。「清理缓存/更新组件」未采纳（无定义/更新通道未建）。
+- 关于弹层加品牌 logo（`desktop/ui/logo.png`，256px/113KB，源图 `GoofishMasterDesktop.png` 1024px 存根目录）。
 
 ## 9. 维护纪律（血泪坑，必读）
 

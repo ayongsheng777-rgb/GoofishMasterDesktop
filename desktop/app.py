@@ -173,6 +173,24 @@ def run():
             except Exception:
                 pass
 
+        def open_frontend(icon, item):
+            """系统浏览器打开管理后台（端口随 config.json）。"""
+            try:
+                import webbrowser
+                port = cfg_mod.load_config().get("ports", {}).get("feishu_agent", 8911)
+                webbrowser.open(f"http://127.0.0.1:{port}")
+            except Exception:
+                pass
+
+        def open_logs(icon, item):
+            """资源管理器打开日志目录。"""
+            try:
+                logdir = cfg_mod.APP_DIR / "data" / "logs"
+                logdir.mkdir(parents=True, exist_ok=True)
+                os.startfile(str(logdir))  # Windows
+            except Exception:
+                pass
+
         def start_backend(icon, item):
             if not launcher.PROCS:
                 launcher.main_start_no_block()
@@ -190,6 +208,9 @@ def run():
 
         menu = Menu(
             MenuItem("显示控制台", show_window),
+            MenuItem("打开管理后台", open_frontend),
+            MenuItem("查看日志", open_logs),
+            Menu.SEPARATOR,
             MenuItem("启动后端", start_backend),
             MenuItem("停止后端", stop_backend),
             Menu.SEPARATOR,

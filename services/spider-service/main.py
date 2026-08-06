@@ -651,6 +651,12 @@ async def _shutdown_login_sessions() -> None:
     """进程退出时兜底回收，避免留下孤儿 chrome.exe / node.exe。"""
     for sid in list(_login_sessions.keys()):
         await _close_login_session(sid)
+    # 采集浏览器复用池：退出时回收池内全部实例（含 Playwright 驱动进程）
+    try:
+        from src.scraper import shutdown_scrape_browser_pool
+        await shutdown_scrape_browser_pool()
+    except Exception as e:
+        logger.warning("回收采集浏览器池失败（忽略）: %s", e)
 
 
 

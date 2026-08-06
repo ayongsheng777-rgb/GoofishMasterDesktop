@@ -101,6 +101,7 @@ async def _get_conn():
         _conn.row_factory = aiosqlite.Row
         await _conn.execute("PRAGMA journal_mode=WAL")
         await _conn.execute("PRAGMA busy_timeout=20000")
+        await _conn.execute("PRAGMA synchronous=NORMAL")
         await _conn.executescript(_SCHEMA)
         logger.info("SQLite connected: %s", DB_PATH)
         return _conn

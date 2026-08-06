@@ -441,13 +441,14 @@
                 <div class="card">
                     <h3>🧠 AI 模型配置</h3>
                     <p style="color:var(--ink2);font-size:13px;margin-bottom:16px;">
-                        配置 AI 服务提供商的 API Key，至少启用一个。配置保存后自动同步到 AI Router。
+                        配置 AI 服务提供商的 API Key，至少启用一个。<strong>API Key 与代理保存后即时热生效</strong>（自动同步到 AI Router），无需重启。
                         调用失败 / 无额度时按降级链自动轮转到下一个已配置模型。
+                        端口、并发数等基础设置则需重启服务后生效。
                     </p>
                     <div class="form-group" style="background:var(--surface);border:1px solid #e3eaf5;border-radius:10px;padding:12px 14px;margin-bottom:16px;">
                         <label style="font-weight:700">🌐 全局代理地址（勾选「走代理」的 provider 生效，如 Gemini/OpenAI）</label>
-                        <input type="text" id="global-proxy-url" placeholder="http://host.docker.internal:1080 （容器内访问宿主机代理）">
-                        <div style="color:var(--ink3);font-size:12px;margin-top:4px;">留空 = 全部直连。容器内请用 host.docker.internal 而非 127.0.0.1。</div>
+                        <input type="text" id="global-proxy-url" placeholder="http://127.0.0.1:1080 （本机代理）">
+                        <div style="color:var(--ink3);font-size:12px;margin-top:4px;">留空 = 全部直连。本机运行的代理直接填 127.0.0.1 地址即可。</div>
                     </div>
                     <div id="ai-providers"></div>
                     <div class="btn-group">

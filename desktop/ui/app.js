@@ -47,8 +47,8 @@ function renderStatus(list) {
   list.forEach((s) => {
     const healthy = s.running && s.health;
     const starting = s.running && !s.health;
-    const dotCls = healthy ? "dot-ok" : starting ? "dot-warn" : "dot-bad";
-    const stateTxt = healthy ? "健康运行" : starting ? "启动中…" : "已停止";
+    const dotCls = s.broken ? "dot-bad" : healthy ? "dot-ok" : starting ? "dot-warn" : "dot-bad";
+    const stateTxt = s.broken ? "已熔断（重启超限）" : healthy ? "健康运行" : starting ? "启动中…" : "已停止";
     const pidTxt = s.pid ? `PID ${s.pid}` : "未运行";
 
     const card = document.createElement("div");

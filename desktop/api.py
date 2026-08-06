@@ -31,6 +31,7 @@ def _status() -> List[Dict[str, Any]]:
             "running": running,
             "health": health,
             "pid": proc.pid if running else None,
+            "broken": name in launcher._BROKEN,  # 看门狗熔断（重启超限停拉）
         })
     return out
 

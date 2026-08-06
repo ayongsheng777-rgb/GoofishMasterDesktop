@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import random
+import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
 from urllib.parse import urlencode
@@ -61,6 +63,167 @@ from src.services.search_pagination import (
     advance_search_page,
     is_search_results_response,
 )
+
+
+# ---------------------------------------------------------------------------
+# 采集浏览器复用池（单实例 + 每任务独立 context）
+#
+# 背景：此前每次采集任务都 `async with async_playwright()` 全新启动 Chromium
+# （冷启动数秒），任务结束即关闭。桌面端采集是间歇性任务，改为「同启动参数
+# 共享一个 browser 实例」可显著降低任务启动延迟，同时避免频繁建毁进程。
+#
+# 设计要点：
+# - 池键 = (proxy, channel, headless)：代理在 launch 期绑定，不同代理/通道/
+#   无头模式的任务不共享实例（轮换代理 on_failure 时会自然获得新实例）；
+# - 每个任务仍新建独立 context（cookie/storage 完全隔离），任务结束只关
+#   context，browser 留在池中复用；
+# - users 引用计数：采集任务本身可能跑很久，空闲回收只针对「无使用者」的
+#   实例，绝不回收正在跑任务的浏览器；
+# - 空闲 IDLE_TTL 秒无使用者自动回收（browser + 驱动进程），不常驻内存；
+# - 浏览器崩溃（is_connected=False）时 acquire/release 自动丢弃，下次重建。
+# 扫码登录会话池（main.py）是独立通道，不经过本池。
+# ---------------------------------------------------------------------------
+class _ScrapeBrowserEntry:
+    __slots__ = ("playwright", "browser", "key", "users", "last_used")
+
+    def __init__(self, playwright, browser, key):
+        self.playwright = playwright
+        self.browser = browser
+        self.key = key
+        self.users = 0
+        self.last_used = time.time()
+
+
+class _ScrapeBrowserPool:
+    IDLE_TTL = 600        # 空闲无使用者多久后回收实例（秒）
+    SWEEP_INTERVAL = 60   # 清扫周期（秒）
+
+    def __init__(self) -> None:
+        self._entries: dict = {}
+        self._lock = asyncio.Lock()
+        self._sweeper: Optional[asyncio.Task] = None
+
+    @staticmethod
+    def _key(proxy_server: Optional[str]) -> tuple:
+        return (proxy_server or "", _resolve_browser_channel(), bool(RUN_HEADLESS))
+
+    @staticmethod
+    async def _launch(proxy_server: Optional[str]):
+        # 反检测启动参数
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--disable-dev-shm-usage",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-web-security",
+            "--disable-features=IsolateOrigins,site-per-process",
+        ]
+        launch_kwargs = {"headless": RUN_HEADLESS, "args": launch_args}
+        if proxy_server:
+            launch_kwargs["proxy"] = {"server": proxy_server}
+        launch_kwargs["channel"] = _resolve_browser_channel()
+        pw = await async_playwright().start()
+        try:
+            browser = await pw.chromium.launch(**launch_kwargs)
+        except Exception:
+            try:
+                await pw.stop()
+            except Exception:
+                pass
+            raise
+        return pw, browser
+
+    async def acquire(self, proxy_server: Optional[str]) -> _ScrapeBrowserEntry:
+        key = self._key(proxy_server)
+        async with self._lock:
+            entry = self._entries.get(key)
+            if entry is not None and not entry.browser.is_connected():
+                # 崩溃残留：移出池，后台清理，随后重建
+                self._entries.pop(key, None)
+                asyncio.create_task(self._dispose(entry))
+                entry = None
+            if entry is None:
+                pw, browser = await self._launch(proxy_server)
+                entry = _ScrapeBrowserEntry(pw, browser, key)
+                self._entries[key] = entry
+                log_time("采集浏览器实例已启动（池化复用）")
+            entry.users += 1
+            entry.last_used = time.time()
+            self._ensure_sweeper()
+            return entry
+
+    async def release(self, entry: _ScrapeBrowserEntry) -> None:
+        async with self._lock:
+            if self._entries.get(entry.key) is not entry:
+                return  # 已被替换/移除，清理由移出方负责
+            entry.users = max(0, entry.users - 1)
+            entry.last_used = time.time()
+            if not entry.browser.is_connected():
+                # 任务期间浏览器崩了：直接丢弃，下次 acquire 重建
+                self._entries.pop(entry.key, None)
+                asyncio.create_task(self._dispose(entry))
+
+    async def _dispose(self, entry: _ScrapeBrowserEntry) -> None:
+        try:
+            await asyncio.wait_for(entry.browser.close(), timeout=15)
+        except Exception as e:
+            log_time(f"回收采集浏览器失败（忽略）: {e}")
+        try:
+            await asyncio.wait_for(entry.playwright.stop(), timeout=15)
+        except Exception as e:
+            log_time(f"停止 Playwright 驱动失败（忽略）: {e}")
+
+    def _ensure_sweeper(self) -> None:
+        t = self._sweeper
+        if t is None or t.done():
+            self._sweeper = asyncio.create_task(self._sweep_loop())
+
+    async def _sweep_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.SWEEP_INTERVAL)
+            now = time.time()
+            async with self._lock:
+                idle = [e for e in self._entries.values()
+                        if e.users == 0 and now - e.last_used > self.IDLE_TTL]
+                for e in idle:
+                    self._entries.pop(e.key, None)
+                empty = not self._entries
+                if empty:
+                    self._sweeper = None
+            for e in idle:
+                log_time("采集浏览器空闲超时，回收实例")
+                await self._dispose(e)
+            if empty:
+                return
+
+    async def shutdown(self) -> None:
+        async with self._lock:
+            entries = list(self._entries.values())
+            self._entries.clear()
+            sweeper = self._sweeper
+            self._sweeper = None
+        if sweeper and not sweeper.done():
+            sweeper.cancel()
+        for e in entries:
+            await self._dispose(e)
+
+
+_SCRAPE_BROWSER_POOL = _ScrapeBrowserPool()
+
+
+async def shutdown_scrape_browser_pool() -> None:
+    """服务退出时回收池内全部实例（供 main.py shutdown 钩子调用）。"""
+    await _SCRAPE_BROWSER_POOL.shutdown()
+
+
+@asynccontextmanager
+async def _pooled_scrape_browser(proxy_server: Optional[str]):
+    """产出池化的采集浏览器实例；任务结束只归还，不关闭实例本身。"""
+    entry = await _SCRAPE_BROWSER_POOL.acquire(proxy_server)
+    try:
+        yield entry.browser
+    finally:
+        await _SCRAPE_BROWSER_POOL.release(entry)
 
 
 class RiskControlError(Exception):
@@ -593,24 +756,9 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
         except Exception as e:
             print(f"警告：读取登录状态文件失败，将直接按路径使用: {e}")
 
-        async with async_playwright() as p:
-            # 反检测启动参数
-            launch_args = [
-                "--disable-blink-features=AutomationControlled",
-                "--disable-dev-shm-usage",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-web-security",
-                "--disable-features=IsolateOrigins,site-per-process",
-            ]
-
-            launch_kwargs = {"headless": RUN_HEADLESS, "args": launch_args}
-            if proxy_server:
-                launch_kwargs["proxy"] = {"server": proxy_server}
-
-            launch_kwargs["channel"] = _resolve_browser_channel()
-
-            browser = await p.chromium.launch(**launch_kwargs)
+        # 池化复用：同启动参数共享 browser 实例，任务结束只归还（由
+        # _pooled_scrape_browser 管理生命周期，空闲超时自动回收）。
+        async with _pooled_scrape_browser(proxy_server) as browser:
 
             context_kwargs = _default_context_options()
             storage_state_arg = state_file
@@ -1266,26 +1414,18 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 if analysis_dispatcher is not None:
                     log_time("等待后台分析任务完成...")
                     await analysis_dispatcher.join(timeout=900)
-                log_time("任务执行完毕，浏览器将在5秒后自动关闭...")
+                log_time("任务执行完毕，释放浏览器上下文（实例保留复用）...")
                 await asyncio.sleep(5)
                 if debug_limit:
-                    input("按回车键关闭浏览器...")
+                    input("按回车键关闭浏览器上下文...")
 
-                # 逐层显式回收：context → browser，两段都套超时。
-                # 原来只 `await browser.close()` 且不设超时，有两个坑：
-                #  1) 页面卡在 JS 死循环时 CDP 不响应，close() 永久挂起，
-                #     整个采集协程连同 event loop 一起吊死（任务再也不返回）；
-                #  2) 长跑任务里 context 累积的 page/网络缓冲要等 browser 关闭
-                #     才整体释放，先关 context 能更早把内存还给系统。
-                # 外层 `async with async_playwright()` 负责 stop 驱动进程。
+                # 只关闭本任务的 context：页面卡死时 CDP 不响应会让 close()
+                # 永久挂起，必须套超时。browser 实例归复用池所有，
+                # 由 _pooled_scrape_browser 归还，空闲超时后统一回收。
                 try:
                     await asyncio.wait_for(context.close(), timeout=15)
                 except Exception as e:
                     log_time(f"关闭浏览器上下文失败（忽略）: {e}")
-                try:
-                    await asyncio.wait_for(browser.close(), timeout=15)
-                except Exception as e:
-                    log_time(f"关闭浏览器失败（忽略）: {e}")
 
         return processed_item_count
 

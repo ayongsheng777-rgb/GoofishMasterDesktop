@@ -100,6 +100,27 @@ SERVICES = _topo_sort(_SERVICE_DEFS)
 PROCS: dict[str, subprocess.Popen] = {}
 _RUNNING = True
 
+# 看门狗重启熔断：服务反复崩溃时，无限重启只会空耗资源并刷爆日志。
+# 统计窗口内自动重启次数超限 → 熔断停拉、标记状态，等待人工排查后手动重启
+# （手动 restart_service / start_all 会清除熔断标记）。
+_BROKEN: set[str] = set()
+_RESTART_HISTORY: dict[str, list[float]] = {}
+_RESTART_WINDOW_SEC = 600   # 统计窗口：10 分钟
+_RESTART_MAX = 5            # 窗口内允许的最大自动重启次数
+
+
+def _record_restart(name: str) -> bool:
+    """记录一次自动重启并检查熔断。返回 False 表示已熔断，不应再重启。"""
+    now = time.time()
+    hist = [t for t in _RESTART_HISTORY.get(name, [])
+            if now - t < _RESTART_WINDOW_SEC]
+    hist.append(now)
+    _RESTART_HISTORY[name] = hist
+    if len(hist) > _RESTART_MAX:
+        _BROKEN.add(name)
+        return False
+    return True
+
 
 # ---------------------------------------------------------------------------
 # 桌面运行前置依赖检测（WebView2 Runtime / 打包的 Playwright Chromium）
@@ -409,6 +430,15 @@ def start_service(svc: dict) -> subprocess.Popen:
         cwd=cwd, env=env,
         stdout=logfile, stderr=subprocess.STDOUT,
     )
+    # 进程树保护：加入 Windows Job Object（KILL_ON_JOB_CLOSE）。主程序被强杀/
+    # 崩溃时，内核级回收该服务及其拉起的 Chromium / Playwright 孙进程，
+    # 不再残留孤儿进程。非 Windows 或初始化失败时静默降级（不阻断启动）。
+    try:
+        from common import jobobject
+        if jobobject.assign(proc, svc["name"]):
+            log.debug("%s 已加入进程树保护 Job", svc["name"])
+    except Exception as e:
+        log.warning("%s 进程树保护挂载失败（不影响启动）：%s", svc["name"], e)
     return proc
 
 
@@ -449,6 +479,8 @@ def wait_health(svc: dict, timeout: float = 40.0) -> bool:
 def start_all() -> None:
     global _RUNNING
     _RUNNING = True
+    _BROKEN.clear()          # 显式启动视为人工介入，重置熔断状态
+    _RESTART_HISTORY.clear()
     for svc in SERVICES:
         if not _RUNNING:
             break
@@ -497,7 +529,9 @@ def stop_service(name: str) -> None:
 
 
 def restart_service(name: str) -> None:
-    """重启单个服务：先停后起并等待健康。"""
+    """重启单个服务：先停后起并等待健康。手动重启会清除该服务的熔断标记。"""
+    _BROKEN.discard(name)
+    _RESTART_HISTORY.pop(name, None)
     stop_service(name)
     svc = next((s for s in SERVICES if s["name"] == name), None)
     if svc is None:
@@ -511,6 +545,9 @@ def status() -> None:
     for svc in SERVICES:
         name = svc["name"]
         port = CFG["ports"][svc["port_key"]]
+        if name in _BROKEN:
+            print(f"  {name:16s}  ⛔ 已熔断（{_RESTART_WINDOW_SEC // 60} 分钟内重启超 {_RESTART_MAX} 次），请查日志后手动重启")
+            continue
         proc = PROCS.get(name)
         if proc and proc.poll() is None:
             ok = health_ok(port)
@@ -520,14 +557,22 @@ def status() -> None:
 
 
 def _watchdog() -> None:
-    """崩溃重启守护（仅重启意外退出的服务）。"""
+    """崩溃重启守护（仅重启意外退出的服务；窗口期内重启超限则熔断停拉）。"""
     while _RUNNING:
         for svc in SERVICES:
-            proc = PROCS.get(svc["name"])
+            name = svc["name"]
+            if name in _BROKEN:
+                continue  # 已熔断：等待人工排查后手动重启
+            proc = PROCS.get(name)
             if proc and proc.poll() is not None and _RUNNING:
-                log.warning("%s 意外退出(code=%s)，重启中…", svc["name"], proc.returncode)
+                if not _record_restart(name):
+                    log.error("%s 在 %d 分钟内重启超过 %d 次，已熔断停拉。"
+                              "请查看 data/logs/%s.log 排查后手动重启该服务。",
+                              name, _RESTART_WINDOW_SEC // 60, _RESTART_MAX, name)
+                    continue
+                log.warning("%s 意外退出(code=%s)，重启中…", name, proc.returncode)
                 new = start_service(svc)
-                PROCS[svc["name"]] = new
+                PROCS[name] = new
                 wait_health(svc)
         time.sleep(3.0)
 
