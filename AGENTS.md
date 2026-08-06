@@ -199,16 +199,16 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 1. **spider 采集**：安装包已随附 Playwright Chromium（rev 1234，`{app}\playwright-browsers`），离线可用；源码开发模式需 `playwright install chromium`。
 2. **完整 DB 能力**：P1 已默认全开（进程内 SQLite/fakeredis/Chroma），无需外部二进制；`backends.*.enabled=false` 才降级。
 3. **桌面 GUI 实测**：✅ 已通过（2026-08-05 晚真机安装最新安装包验证，全部功能正常，含 BUG-10 修复）。
-4. **打包成 .exe**：✅ 已完成（PyInstaller onedir，详见 §11/§13）。**安装包**：✅ 已完成（Inno Setup 6，`GoofishMasterDesktop.iss`，产物 `installer/GoofishMasterDesktop-Setup-1.0.0.exe` 约 580MB，2026-08-05 19:22 重建含 BUG-1~10 全部修复，详见 README.md）。
-5. **安全**：`secret_key` 明文存 `config.json`；未做配置加密。**代码签名**：已加入可选签名脚本 `sign.ps1`（默认跳过——无真实 CA 证书时自签名对发行零信任收益，故不产出自签名）。要真正消除 SmartScreen 拦截需购买 DigiCert/Sectigo/GlobalSign 等 CA 证书后启用（见 `sign.ps1` 头部说明）。
+4. **打包成 .exe**：✅ 已完成（PyInstaller onedir，详见 §11/§13）。**安装包**：✅ 已完成（Inno Setup 6，`GoofishMasterDesktop.iss`，产物 `installer/GoofishMasterDesktop-Setup-1.0.0.exe` 约 580MB）。**2026-08-06 已发布 v1.0.0 稳定版**（含 BUG-1~10 全部修复 + 安全加固，exe 36.4MB，SHA-256 `07a6b8e124434b7572a612b58e2656aabade1b29d005807269b508ded97244e1`，GitHub Release 已挂附件，详见 §8.7 与 README.md）。
+5. **安全**：密钥已从明文升级为 **Windows DPAPI 加密落盘**（`common/secretstore.py`，当前用户作用域，含 `available()` 降级探测）；迁移明文备份 `config.json.plain.bak` 已通过整目录 gitignore `config/` 阻断入库；运行日志经 `common/logfilter.py` 脱敏（AI Key / 飞书 Secret / 闲鱼 Cookie / token 全部打码）。**代码签名**：已加入可选签名脚本 `sign.ps1`（默认跳过——无真实 CA 证书时自签名对发行零信任收益，故不产出自签名）。要真正消除 SmartScreen 拦截需购买 DigiCert/Sectigo/GlobalSign 等 CA 证书后启用（见 `sign.ps1` 头部说明）。
 6. **更新通道**：自动更新 / 增量升级未实现。2026-08-05 已评估三阶段方案：① 版本检查+更新提示（推荐先做，~50 行：desktop/api.py `check_update()` + UI 提示条）；② 后台下载+静默升级（`/VERYSILENT`，全量 ~1GB 下载浪费大）；③ 文件级增量更新（本项目 onedir+源码数据文件化，90% 更新只换 `_internal` 几个 .py，发布时出 hash 清单按 diff 下载，exe 变了才全量）——跳过②，目标 ①→③。
-7. **✅ 发布产物已刷新**：`release/GoofishMasterDesktop/`（`GoofishMasterDesktop.exe` 30.5 MB + `_internal/`，2026-08-04 重打包，已剔除内嵌 config）。
+7. **✅ 发布产物已刷新**：`release/GoofishMasterDesktop/`（`GoofishMasterDesktop.exe` 36.4 MB + `_internal/` + `playwright-browsers/`，2026-08-06 v1.0.0 重打包，已剔除内嵌 config，无 `data/` 残留）。
 8. **🧹 遗留构建产物清理：✅ 已完成（2026-08-04 用户授权，逐项删除并验证）**：
    - `release/goofish-server/`、`dist/goofish-server/` —— 改名前的旧产物（曾内嵌本机 `secret_key`，见 §8.1 BUG-6），**已删除**；
    - `.build/` 历史 `dist_*` / `wp_*`（约 1.4 GB）—— **已删除**，仅保留 `dist_20260804_183919` + `wp_20260804_183919` + 3 个日志；
    - `D:\app\data` 与 `D:\app` —— 项目**目录之外**的空垃圾目录（已修复的 `/app/data` 缺省路径 BUG 造成）—— **已删除**；
    - `_packtest/` + `packtest.spec` + `build/` —— 早期打包探针遗留 —— **已删除**。
-   现状：`release/GoofishMasterDesktop/`（正确产物）完好，exe 30.5 MB + `_internal/`，无内嵌 config/secret_key。
+   现状：`release/GoofishMasterDesktop/`（正确产物）完好，exe 36.4 MB + `_internal/` + `playwright-browsers/`（2026-08-06 v1.0.0），无内嵌 config/secret_key，无 `data/` 残留。
 
 ---
 
