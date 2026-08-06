@@ -2,7 +2,7 @@
 ; 生成安装包: ISCC.exe GoofishMasterDesktop.iss
 
 #define MyAppName "GoofishMasterDesktop"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.4"
 #define MyAppPublisher "GoofishMaster"
 #define MyAppExeName "GoofishMasterDesktop.exe"
 #define MyAppDescription "闲鱼圣手桌面独立运行端"
@@ -122,6 +122,15 @@ begin
 
     { 确保 config 目录存在 }
     ForceDirectories(ConfigDir);
+
+    { 升级/重装保护：已存在的 config.json 绝不覆盖——2026-08-06 实锤事故：
+      旧逻辑无条件重写，把用户的 feishu/ai 凭据、secret_key 全部抹掉。
+      仅在全新安装（config.json 不存在）时才生成初始配置。 }
+    if FileExists(ConfigPath) then
+    begin
+      Log('config.json already exists, keeping user configuration.');
+      exit;
+    end;
 
     { 解析端口（非法值回退默认） }
     P1 := ValidatePort(PortPage.Values[0], 8911);

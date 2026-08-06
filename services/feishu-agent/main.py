@@ -925,10 +925,19 @@ async def health_ready():
                 "reasons": ["common.health 不可用"]}
 
     def _chk_feishu_cred():
+        # 与运行态取凭证的路径对齐：env → credentials.json（扫码配置走这里，
+        # 只写文件不写进程 env）。2026-08-06 实锤：只读 env 会在扫码热配置后
+        # 误报「飞书 App 未配置」假降级，实际 bot 长连接正常收发消息。
         app_id = os.environ.get("FEISHU_APP_ID", "")
         secret = os.environ.get("FEISHU_APP_SECRET", "")
         if app_id and secret:
             return True, "已配置"
+        try:
+            creds = load_credentials(CRED_FILE) or {}
+            if creds.get("app_id") and creds.get("app_secret"):
+                return True, "已配置"
+        except Exception:
+            pass
         return False, "飞书 App 未配置，机器人不可用"
 
     def _chk_bot():

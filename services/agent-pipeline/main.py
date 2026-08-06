@@ -8,7 +8,7 @@ import asyncio, json, logging, os, re, time
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request
 from pydantic import BaseModel, Field
 
 import db
@@ -1347,6 +1347,36 @@ async def startup():
     await db.ensure_schema()
     monitor.start_scheduler()
     logger.info("Agent Pipeline 启动完成（监控调度器已启动）")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    # 优雅关停时收编 WAL（数据并入主库），降低强杀时的恢复窗口
+    await db.close()
+
+
+@app.post("/api/internal/shutdown")
+async def internal_shutdown(request: Request):
+    """内部优雅关停端点（launcher 停止流程调用）。
+
+    windowed 冻结子进程无控制台，CTRL_BREAK 投递不到、terminate 是硬杀，
+    shutdown 事件不触发 → WAL 无法收编（2026-08-06 实锤）。launcher 改走
+    本端点：先自清理（WAL checkpoint），再退出进程。X-Internal-Token 鉴权。
+    """
+    token = os.environ.get("GOOFISH_SECRET_KEY", "").strip()
+    if token and request.headers.get("X-Internal-Token", "") != token:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    async def _deferred_exit():
+        await asyncio.sleep(0.3)  # 让本响应先返回
+        try:
+            await db.close()
+        except Exception:
+            pass
+        os._exit(0)
+
+    asyncio.create_task(_deferred_exit())
+    return {"ok": True, "message": "shutting down"}
 
 
 if __name__ == "__main__":

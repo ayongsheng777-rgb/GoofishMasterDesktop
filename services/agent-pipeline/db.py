@@ -295,3 +295,23 @@ async def fetchval(query: str, *args) -> Any:
 
 def to_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, default=str)
+
+
+async def close() -> None:
+    """关停时收编 WAL 再关闭连接。
+
+    WAL 模式下数据先写 goofish.db-wal，主库文件长期停在几 KB；不
+    checkpoint 就退出的话：① 主库看起来「空的」（2026-08-06 实测：
+    运行数小时主库 4KB、WAL 1.5MB）；② 进程被强杀时 WAL 恢复窗口
+    更大。TRUNCATE 模式 checkpoint 后 WAL 归零、数据全部并入主库。
+    """
+    global _conn
+    conn, _conn = _conn, None
+    if conn is None:
+        return
+    try:
+        await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        await conn.close()
+        logger.info("SQLite closed (WAL checkpointed): %s", DB_PATH)
+    except Exception as e:
+        logger.warning("SQLite close failed: %s", e)

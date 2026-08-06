@@ -133,16 +133,34 @@ def _extract_message_content_types(message: dict) -> list[str]:
     return [str(item.get("type")) for item in content if isinstance(item, dict)]
 
 
+def _fetch_image_bytes(url: str, proxies: dict | None = None):
+    """同步抓取图片（在 executor 中运行，避免阻塞事件循环）。"""
+    response = requests.get(url, headers=IMAGE_DOWNLOAD_HEADERS, timeout=20,
+                            stream=True, proxies=proxies)
+    response.raise_for_status()
+    return response
+
+
 @retry_on_failure(retries=2, delay=3)
 async def _download_single_image(url, save_path):
-    """一个带重试的内部函数，用于异步下载单个图片。"""
+    """一个带重试的内部函数，用于异步下载单个图片。
+
+    直连失败（DNS 解析失败/连接重置等，2026-08-06 实测 img.alicdn.com
+    getaddrinfo failed）时，若配置了 IMAGE_DOWNLOAD_PROXY（或标准
+    HTTPS_PROXY）环境变量，自动经代理兜底重试一次。
+    """
     loop = asyncio.get_running_loop()
-    # 使用 run_in_executor 运行同步的 requests 代码，避免阻塞事件循环
-    response = await loop.run_in_executor(
-        None,
-        lambda: requests.get(url, headers=IMAGE_DOWNLOAD_HEADERS, timeout=20, stream=True)
-    )
-    response.raise_for_status()
+    try:
+        response = await loop.run_in_executor(None, lambda: _fetch_image_bytes(url))
+    except requests.exceptions.ConnectionError:
+        proxy = (os.environ.get("IMAGE_DOWNLOAD_PROXY")
+                 or os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy"))
+        if not proxy:
+            raise
+        safe_print(f"   [图片] 直连失败，经代理重试: {url}")
+        proxies = {"http": proxy, "https": proxy}
+        response = await loop.run_in_executor(
+            None, lambda: _fetch_image_bytes(url, proxies=proxies))
     with open(save_path, 'wb') as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)

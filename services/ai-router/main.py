@@ -1456,10 +1456,15 @@ async def health_ready():
         return False, str(st.get("reason") or "未启用")
 
     def _chk_provider():
+        # 以 MODEL_CONFIG 实时状态为准——WebUI 热更新只改 MODEL_CONFIG
+        # 不写进程环境变量（2026-08-06 实锤：启动后经 WebUI 配置 key，
+        # 探针读 env 误报「未配置任何 AI Key」假降级，实际 AI 正常调用）。
+        _env_prefix = {"gpt": "OPENAI", "deepseek": "DEEPSEEK", "qwen": "QWEN",
+                       "gemini": "GEMINI", "zhipu": "ZHIPU", "moonshot": "MOONSHOT"}
         keys = {
-            "deepseek": os.environ.get("DEEPSEEK_API_KEY", ""),
-            "gemini": os.environ.get("GEMINI_API_KEY", ""),
-            "qwen": os.environ.get("QWEN_API_KEY", ""),
+            slot: cfg.get("api_key")
+                  or os.environ.get(f"{_env_prefix.get(slot, slot.upper())}_API_KEY", "")
+            for slot, cfg in MODEL_CONFIG.items()
         }
         got = [k for k, v in keys.items() if v]
         if got:
@@ -1650,6 +1655,38 @@ async def startup():
     _bg(rag.init_rag())
     configured = [s for s, c in MODEL_CONFIG.items() if c.get("api_key")]
     logger.info("AI Router 启动完成，已配置模型: %s", configured or "（无，等待热更新）")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    # 优雅关停时收编 WAL（数据并入主库），降低强杀时的恢复窗口
+    try:
+        await db.close()
+    except Exception as e:
+        logger.warning("DB close on shutdown failed: %s", e)
+
+
+@app.post("/api/internal/shutdown")
+async def internal_shutdown(request: Request):
+    """内部优雅关停端点（launcher 停止流程调用，X-Internal-Token 鉴权）。
+
+    windowed 冻结子进程收不到 CTRL_BREAK、terminate 是硬杀 → shutdown 事件
+    不触发、WAL 无法收编（2026-08-06 实锤）。launcher 改走本端点自清理后退出。
+    """
+    token = os.environ.get("GOOFISH_SECRET_KEY", "").strip()
+    if token and request.headers.get("X-Internal-Token", "") != token:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    async def _deferred_exit():
+        await asyncio.sleep(0.3)  # 让本响应先返回
+        try:
+            await db.close()
+        except Exception:
+            pass
+        os._exit(0)
+
+    asyncio.create_task(_deferred_exit())
+    return {"ok": True, "message": "shutting down"}
 
 
 if __name__ == "__main__":

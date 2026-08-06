@@ -13,6 +13,24 @@
 
 ---
 
+## 0.5 运行实例与发布纪律（红线，任何改动前先读）
+
+本项目在磁盘上有**两个目录，角色完全不同，搞混必出乱子**（2026-08-06 用户明确立法）：
+
+| 目录 | 角色 | 允许的操作 |
+|---|---|---|
+| `D:\WorkBuddy\GoofishMasterDesktop` | **源码项目**（唯一可改） | 改代码、修 BUG、构建安装包、git 提交 |
+| `D:\GoofishMasterDesktop`（或其它安装位置） | **运行实例**（已安装的 exe 产物） | **只读分析**：探针探测、读日志、读 data/config 做诊断 |
+
+**铁律：**
+
+1. **运行实例只用于分析，永不直接修改。** 它的 `_internal/` 是 PyInstaller 冻结产物，手改其中的 `.py` **不会生效**（字节码已打包进 exe/压缩包），只会造成「以为修了其实没修」的假象。发现运行实例有问题 → 回到源码项目修 → 走下面流程。
+2. **标准修复流程（不可跳步）**：改源码项目 → 构建新安装包（`GoofishMasterDesktop.spec` + `GoofishMasterDesktop.iss`，见 §11/§13）→ 安装新包 → 对运行实例做测试分析验证。任何「先改实例试试」的做法都是禁止的。
+3. **不算修改的例外**：用户通过 WebUI/桌面控制台对运行实例的正常配置（写 `config.json`、扫码配飞书）属使用行为；只读探测（curl `/api/health*`、读 `data/logs/`）属分析行为。这两类不受限制。
+4. **GitHub 同步闸门**：只有在**当前版本零已知 BUG 且用户明确口头同意**后，才允许 `git push` / 发 Release。分析、修 BUG、构建、本地安装测试都**不需要**事先请示，但 push 到远程必须请示。（git 操作细则见 §10）
+
+---
+
 ## 1. 关键事实（先读，避免踩坑）
 
 1. **独立项目**：4 个服务源码在 `services/`，由本项目自有维护。端口整体偏移 +10（8911-8914）。
@@ -407,9 +425,33 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 3. **D:\GoofishMasterDesktop 安装实例修复**：robocopy /MIR 同步新 _internal + 新 exe（保留 config/data/playwright-browsers/webview2_runtime/unins）→ preflight + 4 服务全健康（8911-8914 alive）验证后关停。
 4. 版本号双处同步（.iss MyAppVersion + config.py APP_VERSION=1.1.3）；commit `c22af16` + tag v1.1.3 已推送；Release v1.1.3 已建（id 366099024，安装包 curl 直传 + donate 双图）。v1.1.2 Release 已被删除（无需再标撤回）。
 
+## 8.11 2026-08-06 晚 运行诊断驱动修复批（时间戳 + 探针 + WAL + 图片代理）
+
+运行实例跟踪分析（报告 `D:\WorkBuddy\GoofishMasterDesktop-修复与复检报告-v3.md`）驱动的 6 项修复，全部只改源码项目（8 文件，+126/−12，py_compile 全过；**未构建未提交**，按 §0.5 流程待打包安装验证）：
+
+1. **监控时间戳早 8 小时（UTC 裸奔到 UI）**：`monitor.py list_tasks()` 只对 `datetime` 类型 strftime，而 SQLite `CURRENT_TIMESTAMP` 返回 **str**，分支永不命中。调度侧 `_to_epoch()` 按 UTC 解析是正确的，故**功能无损、纯展示缺陷**（PG→SQLite 迁移遗留，PG 时代 asyncpg 返回 datetime）。修复：新增 `_fmt_local()`（naive 视为 UTC → `astimezone()` 转本地），`list_tasks` 改用它；调度逻辑不碰。
+2. **就绪探针假降级（ai-router）**：`_chk_provider` 只读启动时 env，WebUI 热更新只写 `MODEL_CONFIG` 不写 env → 配置后探针仍报「未配置任何 AI Key」。修复：改读 `MODEL_CONFIG` 实时 api_key（env 仅兜底），与调用链取 key 路径对齐。
+3. **就绪探针假降级（feishu-agent）**：`_chk_feishu_cred` 只读 env，扫码配置只写 `credentials.json` → 同样误报。修复：env 之后回退 `load_credentials(CRED_FILE)`。
+4. **WAL 不收编**：运行数小时主库 4KB、`-wal` 涨到 1.5MB+（复检时 agent 2.4MB / ai-router 4.1MB）。修复：两个 `db.py` 加 `close()`（`wal_checkpoint(TRUNCATE)` 后关连接），挂到各自 FastAPI `shutdown` 事件。
+5. **图片下载 DNS 抖动（环境性，非偶发）**：`img.alicdn.com getaddrinfo failed` 两次实锤，同时刻系统 nslookup/curl 正常——本机代理客户端（TUN/增强模式）间歇劫持系统 DNS。修复：`_download_single_image` 直连 `ConnectionError` 时经 `IMAGE_DOWNLOAD_PROXY`（缺省 `HTTPS_PROXY`）兜底重试一次；launcher 向 spider 注入该变量（`spider.image_download_proxy` 优先，缺省复用 `ai.proxy_url`）。
+6. **版本号「不一致」非缺陷**：`APP_VERSION=1.1.3` 是安装包版本（升级检查用），2.0.0/2.1.0 是服务内部版本，两个版本域，不动。
+
+**遗留观察项**（下轮候选）：qwen 平均延迟 28.5s（deepseek 2.6s 的 11 倍，tokens 占 65%）是流水线尾延迟主因；`VISION_FALLBACK_ORDER` 中 gemini 未配置 → 视觉分析实际 qwen 单点；建议配置 `ai.proxy_url=http://127.0.0.1:1080` 一箭双雕（AI 调用 + 图片兜底）。
+
+## 8.12 2026-08-06 深夜 v1.1.4 构建安装验证批（装出 3 个真 Bug，全部修复并实证）
+
+按 §0.5 流程执行「构建 → 安装 → 测试分析」，三轮循环每轮都在安装/测试阶段抓到一个新真 Bug，这正是流程存在的意义。**教训：安装器与停止链路的 Bug 只有真装真停才能暴露，单看代码看不出来。**
+
+1. **安装包覆盖用户 config.json（安装器 Bug，高危）**：`.iss` 的 `ssPostInstall` 无条件 `SaveStringToFile(config.json)`，覆盖安装即抹掉用户 feishu/ai 凭据与 secret_key（第一次装 v1.1.4 实测被清，靠装前备份救回）。修复：`if FileExists(ConfigPath) then exit`——仅全新安装才生成初始配置。实证：修复后连续 3 次覆盖安装，config.json 逐字节保留。
+2. **CLI `stop` 对运行实例完全无效（跨进程 Bug，高危）**：旧实现 `stop` action 调本进程 `stop_all()`，而 CLI 是新进程、`PROCS` 恒空 → 打印「已关停」实则什么都没停，GUI 模式下只能强杀。修复：标志文件 + pid 文件机制——CLI 写 `data/launcher.stop`、编排器看门狗每轮消费 → `stop_all()` + 退出；`_orchestrator_pid()` 用 `OpenProcess` 探活。实证：stop 后 0 进程 0 监听端口。**强杀顺序教训：必须先杀编排器父进程再杀子服务**——先杀子服务会给看门狗留 2 秒复活窗口（实测复活了 agent-pipeline 孤儿进程导致安装 exit=5）。
+3. **WAL 优雅收编不生效（Windows 信号盲区）**：§8.11 的 `db.close()` 挂在 FastAPI shutdown 事件上，但 windowed 冻结子进程**无控制台收不到 CTRL_BREAK_EVENT**，而 `proc.terminate()` 在 Windows 就是 TerminateProcess 硬杀 → shutdown 事件永不触发（实测 stop 后 WAL 原样残留）。修复：两个 SQLite 服务（ai-router/agent-pipeline）新增 `POST /api/internal/shutdown`（X-Internal-Token=GOOFISH_SECRET_KEY 鉴权，延迟 0.3s 先返回响应 → `db.close()` → `os._exit(0)`）；launcher `_terminate` 先走该 HTTP 优雅通道，失败才降级 terminate→kill。实证：CLI stop 后 `-wal`/`-shm` 消失，主库 4KB→708KB（agent-pipeline）、946KB→1.39MB（ai-router），数据全部并入主库。
+
+**v1.1.4 最终验证矩阵（全绿）**：4/4 就绪探针 healthy；监控时间戳本地时区（last_run 20:58 = 实际 20:58）；config 跨 3 次覆盖安装保留；CLI stop 真全停；WAL 关停收编。版本号双处 1.1.4（.iss + APP_VERSION）。产物：`installer/GoofishMasterDesktop-Setup-1.1.4.exe`（608,429,234 B）。**未提交 git**——按 §0.5 闸门，待用户确认零 BUG 后再 push。
+
 ## 9. 维护纪律（血泪坑，必读）
 
-- **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。
+- **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对；被拦截时**改名代替删除**（`Rename-Item xxx xxx_old_时间戳`），残留集中后统一清。
+- **强杀运行实例顺序：先父后子**——先杀编排器父进程（无 `--service` 参数），再杀子服务；反过来的间隙看门狗会复活子进程成孤儿（2026-08-06 实测致安装 exit=5）。v1.1.4 起优先用 `GoofishMasterDesktop.exe stop`（跨进程优雅停，含 WAL 收编）。
 - **.venv 重建**：`python -m venv .venv --clear` 会因批量删除被拦截。正确做法：先 `mv .venv .venv_bak`（rename 不是删除），再新建 `.venv` 并 `pip install -r requirements.txt`，确认无误后删 `.venv_bak`。
 - **依赖导入名陷阱**：`pywebview` 导入名是 `webview`；`pyyaml` 导入名是 `yaml`。测试写错名会误判缺包。
 - **改 services/ 是改本项目业务逻辑**：`services/` 由本项目自有维护，不存在上游副本概念；桌面化逻辑在 `launcher/common/desktop`。
@@ -436,6 +478,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - git 邮箱用 noreply 隐私保护：`277914440+ayongsheng777-rgb@users.noreply.github.com`
 - `git push` **走代理**（GitHub 属境外服务，本机直连不通）：push 前 `git config --global http.proxy http://127.0.0.1:1080 && git config --global https.proxy http://127.0.0.1:1080`，再 `git push`；API 调用（curl/Python）同理可用代理。
 - 提交信息用中文，说明改了哪层（launcher/common/desktop 还是 services 业务逻辑）。
+- **🚨 推送闸门（2026-08-06 立法，见 §0.5）**：`git push` / 发 Release 前必须满足两个条件——当前版本**零已知 BUG** + **用户明确同意**。本地 commit 不受限，push 必须请示。
 
 ---
 

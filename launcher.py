@@ -21,6 +21,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Optional
 
 # 冻结感知：PyInstaller onedir 下资源（services/config/...）位于 sys._MEIPASS
 # （即 _internal 目录），不能用 __file__ 或 exe 父目录。
@@ -342,6 +343,15 @@ def build_env(name: str) -> dict:
         e["FEISHU_AGENT_URL"] = urls["feishu_agent"]
         e["RUN_HEADLESS"] = "true"
         e["RUNNING_IN_DOCKER"] = "false"
+        # 商品图下载的代理兜底：本机代理客户端（增强/TUN 模式）会间歇性
+        # 劫持/打断系统 DNS，导致 img.alicdn.com getaddrinfo failed
+        # （2026-08-06 两次实锤）。spider.image_download_proxy 优先，
+        # 缺省复用 ai.proxy_url；为空则直连失败即报错（维持原行为）。
+        spider_cfg = CFG.get("spider") or {}
+        e["IMAGE_DOWNLOAD_PROXY"] = (
+            spider_cfg.get("image_download_proxy", "")
+            or (CFG.get("ai") or {}).get("proxy_url", "")
+        )
         # 桌面端优先使用随附的 Playwright Chromium（而非系统 Chrome/Edge），
         # 保证离线环境也能采集；scraper 读取该变量决定是否走 bundled 通道。
         if _chromium_installed():
@@ -491,9 +501,41 @@ def start_all() -> None:
     status()
 
 
+def _graceful_http_shutdown(name: str, timeout: float = 2.0) -> bool:
+    """先请服务自己优雅退出（FastAPI 内部端点做 WAL checkpoint 等清理）。
+
+    背景：windowed 子进程无控制台，CTRL_BREAK_EVENT 投递不到；
+    proc.terminate() 在 Windows 是 TerminateProcess 硬杀，shutdown 事件
+    永远不触发（2026-08-06 实测 stop 后 WAL 原样残留实锤）。
+    改为走服务自带的 POST /api/internal/shutdown（X-Internal-Token 鉴权）。
+    """
+    svc = next((s for s in SERVICES if s["name"] == name), None)
+    token = os.environ.get("GOOFISH_SECRET_KEY", "") or CFG.get("secret_key", "")
+    if svc is None or not token:
+        return False
+    port = CFG["ports"][svc["port_key"]]
+    try:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/api/internal/shutdown",
+            method="POST",
+            headers={"X-Internal-Token": token},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
 def _terminate(proc: subprocess.Popen, name: str, timeout: float = 8.0) -> None:
     if proc.poll() is not None:
         return
+    # 1. 优雅通道：服务自清理（WAL checkpoint）后自行退出
+    if _graceful_http_shutdown(name):
+        try:
+            proc.wait(timeout=timeout + 4)
+            return
+        except Exception:
+            log.warning("%s 接受优雅关停但未及时退出，降级 terminate", name)
     try:
         proc.terminate()
     except Exception:
@@ -516,6 +558,91 @@ def stop_all() -> None:
         _terminate(proc, name)
     PROCS.clear()
     log.info("已关停。")
+
+
+# ---------- 跨进程控制（CLI stop/restart 触达运行中的编排器） ----------
+# 2026-08-06 实锤：旧实现 CLI `stop` 只调本进程的 stop_all()，而新 CLI 进程
+# 的 PROCS 恒为空 → 对运行中的实例（尤其 GUI 模式）完全无效却打印「已关停」，
+# 升级覆盖安装前只能靠强杀。改为标志文件 + pid 文件机制：
+#   CLI 写 launcher.stop → 编排器看门狗消费 → stop_all() + 退出进程。
+
+def _ctrl_dir() -> Path:
+    d = cfg_mod.APP_DIR / "data"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _stop_flag() -> Path:
+    return _ctrl_dir() / "launcher.stop"
+
+
+def _pid_file() -> Path:
+    return _ctrl_dir() / "launcher.pid"
+
+
+def _orchestrator_pid() -> Optional[int]:
+    """读取运行中编排器的 pid（不存在/已死返回 None）。"""
+    try:
+        raw = _pid_file().read_text(encoding="utf-8").strip()
+        pid = int(raw)
+        import ctypes
+        h = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # QUERY_LIMITED_INFORMATION
+        if h:
+            ctypes.windll.kernel32.CloseHandle(h)
+            return pid
+    except Exception:
+        pass
+    return None
+
+
+def _write_pid_file() -> None:
+    try:
+        _pid_file().write_text(str(os.getpid()), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _remove_pid_file() -> None:
+    try:
+        _pid_file().unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
+def _consume_stop_flag() -> bool:
+    """看门狗每次循环调用：有停止请求则全停并返回 True。"""
+    try:
+        if _stop_flag().exists():
+            _stop_flag().unlink(missing_ok=True)
+            log.info("收到 CLI 停止请求，正在关停…")
+            stop_all()
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def cli_stop() -> None:
+    """CLI 停止：给运行中的编排器发停止请求；本进程持有服务时直接停。"""
+    if PROCS:
+        stop_all()
+        return
+    pid = _orchestrator_pid()
+    if pid is None:
+        print("没有正在运行的实例。")
+        return
+    try:
+        _stop_flag().write_text(str(time.time()), encoding="utf-8")
+    except Exception as e:
+        print(f"写入停止请求失败: {e}")
+        return
+    # 等编排器消费标志并退出（看门狗 3s 一轮 + 关停耗时）
+    for _ in range(30):
+        time.sleep(0.5)
+        if not _stop_flag().exists() and _orchestrator_pid() is None:
+            print("已关停。")
+            return
+    print("停止请求已发送，但实例退出超时——请检查 data/logs/launcher.log")
 
 
 def stop_service(name: str) -> None:
@@ -559,6 +686,10 @@ def status() -> None:
 def _watchdog() -> None:
     """崩溃重启守护（仅重启意外退出的服务；窗口期内重启超限则熔断停拉）。"""
     while _RUNNING:
+        # CLI stop/restart 的跨进程停止请求：全停后退出编排器进程
+        if _consume_stop_flag():
+            _remove_pid_file()
+            os._exit(0)
         for svc in SERVICES:
             name = svc["name"]
             if name in _BROKEN:
@@ -580,6 +711,7 @@ def _watchdog() -> None:
 def _handle_signal(signum, frame):
     log.info("收到信号 %s，准备退出", signum)
     stop_all()
+    _remove_pid_file()
     sys.exit(0)
 
 
@@ -587,6 +719,7 @@ def main_start_no_block() -> None:
     """非阻塞启动：起后台线程拉起全部服务 + 看门狗，立即返回（供桌面壳调用）。"""
     global _RUNNING
     _RUNNING = True
+    _write_pid_file()
     import threading
     threading.Thread(target=start_all, daemon=True).start()
     threading.Thread(target=_watchdog, daemon=True).start()
@@ -650,13 +783,19 @@ def main():
         status()
         return
     if args.action == "stop":
-        stop_all()
+        cli_stop()
         return
     if args.action == "restart":
-        stop_all()
+        cli_stop()
         time.sleep(1)
 
     # start / restart
+    _write_pid_file()
+    # 清掉可能残留的停止标志（否则看门狗第一轮就会自杀）
+    try:
+        _stop_flag().unlink(missing_ok=True)
+    except Exception:
+        pass
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
     try:

@@ -183,6 +183,21 @@ def to_json(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, default=str)
 
 
+async def close() -> None:
+    """关停时收编 WAL 再关闭连接（与 agent-pipeline/db.py 同款，
+    2026-08-06 补齐）——主库不再长期停在 4KB、数据全堆在 -wal 里。"""
+    global _conn
+    conn, _conn = _conn, None
+    if conn is None:
+        return
+    try:
+        await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        await conn.close()
+        logger.info("SQLite closed (WAL checkpointed): %s", DB_PATH)
+    except Exception as e:
+        logger.warning("SQLite close failed: %s", e)
+
+
 async def log_ai_call(task_type: str, input_text: str, output: Any,
                       model: str, tokens: int, latency_ms: int) -> None:
     """Fire-and-forget AI call logging into ai_logs."""

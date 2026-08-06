@@ -66,6 +66,30 @@ def _to_epoch(value: Any) -> Optional[float]:
     return value.timestamp()
 
 
+def _fmt_local(value: Any) -> Optional[str]:
+    """Format a DB timestamp for display in local time.
+
+    PG/asyncpg returns TIMESTAMP columns as datetime objects; SQLite returns
+    CURRENT_TIMESTAMP as a naive UTC *string* — the old code only handled the
+    datetime branch, so under SQLite the raw UTC string leaked to the UI and
+    every timestamp displayed 8h early (2026-08-06 实锤：last_run 显示
+    10:35，实际 18:35，用户误判监控停摆 8 小时）。
+    Treat naive values as UTC and convert to local time.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return str(value)
+    if not isinstance(value, datetime):
+        return str(value)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
 # ============ Task CRUD (DB-backed) ============
 
 async def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -99,8 +123,7 @@ async def list_tasks(include_stopped: bool = True) -> List[Dict[str, Any]]:
            FROM monitor_tasks ORDER BY created_at DESC LIMIT 100""")
     for r in rows:
         for k in ("last_run", "created_at"):
-            if isinstance(r.get(k), datetime):
-                r[k] = r[k].strftime("%Y-%m-%d %H:%M")
+            r[k] = _fmt_local(r.get(k))
     if include_stopped:
         return rows
     return [r for r in rows if r.get("status") == "running"]
