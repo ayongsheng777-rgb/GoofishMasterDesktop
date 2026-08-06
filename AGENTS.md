@@ -446,7 +446,7 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 2. **CLI `stop` 对运行实例完全无效（跨进程 Bug，高危）**：旧实现 `stop` action 调本进程 `stop_all()`，而 CLI 是新进程、`PROCS` 恒空 → 打印「已关停」实则什么都没停，GUI 模式下只能强杀。修复：标志文件 + pid 文件机制——CLI 写 `data/launcher.stop`、编排器看门狗每轮消费 → `stop_all()` + 退出；`_orchestrator_pid()` 用 `OpenProcess` 探活。实证：stop 后 0 进程 0 监听端口。**强杀顺序教训：必须先杀编排器父进程再杀子服务**——先杀子服务会给看门狗留 2 秒复活窗口（实测复活了 agent-pipeline 孤儿进程导致安装 exit=5）。
 3. **WAL 优雅收编不生效（Windows 信号盲区）**：§8.11 的 `db.close()` 挂在 FastAPI shutdown 事件上，但 windowed 冻结子进程**无控制台收不到 CTRL_BREAK_EVENT**，而 `proc.terminate()` 在 Windows 就是 TerminateProcess 硬杀 → shutdown 事件永不触发（实测 stop 后 WAL 原样残留）。修复：两个 SQLite 服务（ai-router/agent-pipeline）新增 `POST /api/internal/shutdown`（X-Internal-Token=GOOFISH_SECRET_KEY 鉴权，延迟 0.3s 先返回响应 → `db.close()` → `os._exit(0)`）；launcher `_terminate` 先走该 HTTP 优雅通道，失败才降级 terminate→kill。实证：CLI stop 后 `-wal`/`-shm` 消失，主库 4KB→708KB（agent-pipeline）、946KB→1.39MB（ai-router），数据全部并入主库。
 
-**v1.1.4 最终验证矩阵（全绿）**：4/4 就绪探针 healthy；监控时间戳本地时区（last_run 20:58 = 实际 20:58）；config 跨 3 次覆盖安装保留；CLI stop 真全停；WAL 关停收编。版本号双处 1.1.4（.iss + APP_VERSION）。产物：`installer/GoofishMasterDesktop-Setup-1.1.4.exe`（608,429,234 B）。**未提交 git**——按 §0.5 闸门，待用户确认零 BUG 后再 push。
+**v1.1.4 最终验证矩阵（全绿）**：4/4 就绪探针 healthy；监控时间戳本地时区（last_run 20:58 = 实际 20:58）；config 跨 3 次覆盖安装保留；CLI stop 真全停；WAL 关停收编。版本号双处 1.1.4（.iss + APP_VERSION）。产物：`installer/GoofishMasterDesktop-Setup-1.1.4.exe`（608,360,113 B）。**已按 §0.5 闸门经用户同意后同步**：commit `39431cb` + tag v1.1.4 已推送，Release v1.1.4 已建并上传安装包（gh CLI，先建空 Release 再传资产——`gh release create` 带资产时上传失败会回滚删 Release，且本机经代理上传 580MB 约 15 分钟）。
 
 ## 9. 维护纪律（血泪坑，必读）
 
