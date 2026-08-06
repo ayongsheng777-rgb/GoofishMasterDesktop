@@ -1,6 +1,6 @@
-# GoofishMasterDesktop 闲鱼圣手桌面端 v1.0.0
+# GoofishMasterDesktop 闲鱼圣手桌面端 v1.1.0
 
-> **v1.0.0 正式稳定版**——在前序测试版全部实测修复的基础上，进一步完成安全加固与稳定性收尾（密钥加密、日志脱敏、浏览器进程回收、单元测试）。
+> **v1.1.0 稳定性增强版**——在 v1.0.0（实测修复 + DPAPI 安全加固）基础上，针对「进程生命周期、资源占用、故障自愈」三个维度做系统性加固。
 > 作者是一名线下电脑实体店店主，利用 WorkBuddy 在业余时间开发，欢迎试用并提出问题。
 
 ## 这是什么
@@ -12,39 +12,24 @@
 - 数据全嵌入式：SQLite（替代 PostgreSQL）、fakeredis（替代 Redis）、Chroma（替代 Qdrant）
 - 桌面控制台（pywebview + 系统托盘），双击即用
 
-## 本次测试版包含
+## 🛡️ v1.1.0 本次新增（稳定性增强）
 
-### ✨ 核心能力
-- **闲鱼商品监控**：关键词搜索、AI 智能分析、风险/捡漏评分、飞书卡片推送（需自建飞书应用）
-- **完全离线采集**：已随安装包附带 Playwright Chromium（rev 1234），采集不依赖系统 Chrome/Edge
-- **桌面控制台**：可视化查看服务状态、配置、日志；系统托盘常驻
-- **环境检测卡片**：直观显示 WebView2 Runtime 与 Chromium 是否就绪
+- **进程树保护（Windows Job Object）**：主程序被强杀或异常崩溃时，后台不再残留 Chromium / Playwright 孤儿进程——内核级 Job Object 管理整棵服务进程树，退出即全量回收
+- **采集浏览器实例复用**：不再每个采集任务冷启动一次 Chromium，同参数任务共享实例、独立上下文隔离，空闲 10 分钟自动释放，崩溃自动重建
+- **看门狗重启熔断**：服务反复崩溃时不再无限重启——10 分钟内重启超 5 次即熔断停拉，控制台卡片显示「已熔断」，人工排查后手动重启恢复
+- **SQLite 写入优化**：全部库文件启用 `synchronous=NORMAL`（配合已有 WAL + 忙等待）
+- **托盘菜单增强**：新增「打开管理后台」「查看日志」；「关于」弹层加入品牌图标
+- **界面文案修正**：AI 配置页明确标注即时生效 vs 需重启的设置项
 
-### 🔧 安装与依赖（本版重点改进）
-- **WebView2 固定版本运行时随包分发（约 500MB，已内置）**：桌面窗口渲染完全离线、免 UAC、不依赖系统预装 Runtime
-- **修复安装报错 `IPersistFile::Save failed; code 0x80070005 拒绝访问`**：旧版会在所有用户桌面建快捷方式，因非提权而在部分机器上失败；本版改为当前用户桌面，不再报错
-- 默认安装到 `D:\GoofishMasterDesktop`（可改），端口安装时可自定义（默认 8911/8912/8913/8914，仅绑定 127.0.0.1 本机）
-
-### 🐞 实测修复（2026-08-05 刷新，真机验证通过）
-- 监控任务无法创建 / 一直无反馈（SQLite 持久化误关 + 列表入库失败）
-- 搜索重启后任务中心消失；搜索时区崩溃（Windows 缺 Asia/Shanghai 数据）
-- 采集失败被误报为「未找到商品」（未登录明确提示扫码，异常如实报原因）
-- 任务中心「已发现数量」恒为 0、飞书「停止/删除/设置」找不到任务（PG→SQLite 参数绑定错位，系统性修复）
-- 模型配置重启丢失 / 扫码二次点击 / 验证器旧名 / 桌面图标崩溃等一并修复
-
-### 🔒 v1.0.0 安全加固与稳定性收尾（本次新增）
-- **密钥本地加密**：`config.json` 中的 AI Key / 飞书 AppSecret 现经 Windows DPAPI 加密落盘（当前用户作用域，无法读取明文），DPAPI 不可用时自动降级并告警
-- **日志脱敏**：运行日志自动遮蔽 AI Key / 飞书 Secret / 闲鱼 Cookie / token，运维日志不再成为泄密面
-- **修复 Playwright 进程泄漏**：扫码登录异常分支未释放 Chromium 进程的问题已修复（曾导致每次登录失败泄漏一个 Chromium + node 进程），并加入浏览器池 TTL 清扫与并发上限保护
-- **测试套件**：新增 `tests/` 单元测试 66 项（配置深合并 / 加密 / 启动编排 / 日志脱敏 / 健康聚合 / 浏览器生命周期），全绿并通过变异测试验证
+> 升级建议：直接运行 v1.1.0 安装包覆盖安装即可，配置与数据（`config.json`、`data/`）不受影响。
 
 ## 安装步骤
 
-1. 下载下方 `GoofishMasterDesktop-Setup-1.0.0.exe`（约 580MB）
+1. 下载下方 `GoofishMasterDesktop-Setup-1.1.0.exe`（约 580MB）
 2. 双击运行安装包
 3. 若 Windows SmartScreen 弹出「Windows 已保护你的电脑」——**正常**（见已知问题），点「更多信息」→「仍要运行」
 4. 选择路径、设端口，勾选「创建桌面快捷方式」
-5. 完成後桌面双击 `GoofishMasterDesktop` 启动；首次启动自动生成随机 `secret_key`
+5. 完成后桌面双击 `GoofishMasterDesktop` 启动；首次启动自动生成随机 `secret_key`
 
 > 首次使用需在 `config.json`（或桌面控制台）填写 AI Key（DeepSeek 等）与飞书 App 信息，否则只有本地分析能力、飞书推送不可用。
 
@@ -58,7 +43,7 @@
 
 ## 如何反馈
 
-测试版最缺真实环境反馈。遇到问题请在 Issue 里贴出：操作系统版本、报错截图或 `data/logs/` 日志、复现步骤。每一条反馈都能让小工具更稳一点。
+遇到问题请在 Issue 里贴出：操作系统版本、报错截图或 `data/logs/` 日志、复现步骤。每一条反馈都能让小工具更稳一点。
 
 ## 支持作者
 
@@ -66,7 +51,7 @@
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0/donate-alipay.jpg) |
+| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.0/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.0/donate-alipay.jpg) |
 
 ---
 
@@ -84,4 +69,4 @@
 
 完整发行说明见仓库 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-**校验信息**：版本 `v1.0.0`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.0.0.exe` · 约 580 MB（608,101,372 字节）· SHA-256 `07a6b8e124434b7572a612b58e2656aabade1b29d005807269b508ded97244e1` · Windows 10/11 x64 · 许可 MIT
+**校验信息**：版本 `v1.1.0`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.1.0.exe` · 约 580 MB（608,231,891 字节）· SHA-256 `d750a0f132a8d5c110a195066602f6e766106c104568c8d963ca71327afa14b0` · Windows 10/11 x64 · 许可 MIT

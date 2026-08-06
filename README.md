@@ -4,13 +4,13 @@
 
 四个微服务（飞书智能体 / AI 路由 / 分析编排 / 采集服务）由统一编排器拉起、健康巡检并优雅关停，**零 Docker、零命令行、零外部数据库**——双击即用。所有数据存储（SQLite / fakeredis / Chroma）全部进程内嵌入式，随程序同级落盘。
 
-## 下载（v1.0.0 稳定版）
+## 下载（v1.1.0 稳定版）
 
 > 当前安装包**未做数字签名**，Windows SmartScreen 可能弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」即可，不影响功能。
 
-- **GitHub Releases**：[v1.0.0 安装包（约 580MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.0.0)
+- **GitHub Releases**：[v1.1.0 安装包（约 580MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.1.0)
 
-> 当前安装包已包含截至 2026-08-05 的全部实测修复（监控持久化、搜索恢复、已发现数量统计、飞书停止/删除指令等 10 项），以及 2026-08-06 的安全加固与稳定性收尾（DPAPI 密钥加密、日志脱敏、Playwright 进程泄漏修复、单元测试套件），并在真机完整验证通过。
+> v1.1.0 在 v1.0.0（实测修复 + 安全加固）基础上完成稳定性增强：Windows Job Object 进程树保护（强杀主程序不再残留 Chromium）、采集浏览器实例复用、看门狗重启熔断、SQLite 写入优化、托盘菜单增强。详见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
 ## 特性
 
@@ -71,7 +71,7 @@ feishu-agent        ai-router     agent-pipeline  spider-service
 
 ### 方式一：安装包（推荐普通用户）
 
-1. 下载 `GoofishMasterDesktop-Setup-1.0.0.exe`
+1. 下载 `GoofishMasterDesktop-Setup-1.1.0.exe`
 2. 双击运行安装向导
 3. 选择安装路径（默认 `D:\GoofishMasterDesktop`，可改）
 4. 设置 4 个服务端口（默认 8911-8914，可改，均绑定 127.0.0.1）
@@ -225,7 +225,7 @@ GoofishMasterDesktop.exe restart <name>  # 重启指定服务
 ```bash
 # 先确保 release/GoofishMasterDesktop/ 是最新构建产物
 "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" GoofishMasterDesktop.iss
-# 产物在 installer/GoofishMasterDesktop-Setup-1.0.0.exe
+# 产物在 installer/GoofishMasterDesktop-Setup-<版本>.exe（版本号见 .iss 的 MyAppVersion）
 ```
 
 ## 目录结构
