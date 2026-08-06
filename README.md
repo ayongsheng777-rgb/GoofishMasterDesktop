@@ -4,13 +4,13 @@
 
 四个微服务（飞书智能体 / AI 路由 / 分析编排 / 采集服务）由统一编排器拉起、健康巡检并优雅关停，**零 Docker、零命令行、零外部数据库**——双击即用。所有数据存储（SQLite / fakeredis / Chroma）全部进程内嵌入式，随程序同级落盘。
 
-## 下载（v1.1.1 稳定版）
+## 下载（v1.1.2 稳定版）
 
 > 当前安装包**未做数字签名**，Windows SmartScreen 可能弹出「Windows 已保护你的电脑」，点「更多信息」→「仍要运行」即可，不影响功能。
 
-- **GitHub Releases**：[v1.1.1 安装包（约 580MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.1.1)
+- **GitHub Releases**：[v1.1.2 安装包（约 580MB）](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/tag/v1.1.2)
 
-> v1.1.1 新增：「重新配置」彻底清空飞书配置无残留、飞书「停止搜索」指令（可随时中止采集）、窗口最小化至托盘、内置《使用说明》文档（关于窗口一键打开，含赞助捐赠板块）。v1.1.0 已含：Job Object 进程树保护、采集浏览器复用、看门狗重启熔断、SQLite 写入优化。详见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
+> v1.1.2 新增：日志崩塌修复、AI 429 指数退避、多页采集参数（`找 XX N页`）。v1.1.1 已含：「重新配置」彻底清理、飞书「停止搜索」指令、窗口最小化至托盘、内置《使用说明》文档。详见 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
 ## 特性
 

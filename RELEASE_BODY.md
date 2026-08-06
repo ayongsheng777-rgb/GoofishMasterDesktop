@@ -1,6 +1,6 @@
-# GoofishMasterDesktop 闲鱼圣手桌面端 v1.1.1
+# GoofishMasterDesktop 闲鱼圣手桌面端 v1.1.2
 
-> **v1.1.1 体验完善版**——在 v1.1.0（稳定性增强）基础上，补齐配置清理、任务控制与使用引导。
+> **v1.1.2 体验完善版**——修复日志崩塌、AI 限流退避，新增多页采集参数。
 > 作者是一名线下电脑实体店店主，利用 WorkBuddy 在业余时间开发，欢迎试用并提出问题。
 
 ## 这是什么
@@ -12,17 +12,16 @@
 - 数据全嵌入式：SQLite（替代 PostgreSQL）、fakeredis（替代 Redis）、Chroma（替代 Qdrant）
 - 桌面控制台（pywebview + 系统托盘），双击即用
 
-## 🆕 v1.1.1 本次新增
+## 🆕 v1.1.2 本次新增
 
-- **「重新配置」彻底清理**：管理后台的飞书「重新配置」按钮现在会完整清掉全部配置——断开机器人长连接、取消进行中的扫码、删除凭证文件、清空 config.json 中的飞书段、清进程环境变量，无任何残留
-- **飞书「停止搜索」指令**：一次性搜索随时可中止——发送「停止搜索」即可，采集立即中断、任务中心如实显示「已停止」
-- **窗口最小化至托盘**：控制台窗口点最小化与点关闭一样收起进系统托盘，不占任务栏
-- **内置《使用说明》文档**：关于窗口新增「📖 使用说明」按钮，系统浏览器打开完整图文指南（含赞助捐赠板块）
-- **关于窗口品牌化**：加入品牌图标与「闲鱼圣手」标识
+- **修复日志崩塌**：蜘蛛爬虫的 `sys.stdout.detach()` 在采集时撕裂 uvicorn/logging 底层 buffer，导致全程日志全是 `ValueError: underlying buffer has been detached` 报错（几千行噪音覆盖真实采集进度，排查不可见）。已改为 `io.TextIOWrapper` 安全重包装。
+- **AI 429 退避机制**：API 限流 / 额度不足时不再立即重试 ×4 反复撞墙，改为指数退避（2^N + 随机抖动，上限 60s），避免限流风暴。管线层已有单品异常隔离，单件分析失败不会拖死整次搜索。
+- **多页采集参数**：飞书搜索指令支持追加「N页」，如 `找 笔记本电脑 3页` 可采集约 90 件商品（默认 1 页 / 约 30 件，上限 10 页）。搜索确认回复会动态显示预估耗时。全链路透传：命令解析 → 飞书代理 → 管线 → 蜘蛛。
+- **使用说明文档完善**：指令帮助中新增「N页」条件筛选说明与示例。
 
 ## 安装步骤
 
-1. 下载下方 `GoofishMasterDesktop-Setup-1.1.1.exe`（约 580MB）
+1. 下载下方 `GoofishMasterDesktop-Setup-1.1.2.exe`（约 580MB）
 2. 双击运行安装包
 3. 若 Windows SmartScreen 弹出「Windows 已保护你的电脑」——正常（见已知问题），点「更多信息」→「仍要运行」
 4. 选择路径、设端口，勾选「创建桌面快捷方式」
@@ -48,7 +47,7 @@
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.1/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.1/donate-alipay.jpg) |
+| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.2/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.1.2/donate-alipay.jpg) |
 
 ---
 
@@ -66,4 +65,4 @@
 
 完整发行说明见仓库 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-**校验信息**：版本 `v1.1.1`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.1.1.exe` · 约 580 MB（608,428,947 字节）· SHA-256 `329e8d1ee38f48abdd54abc7c97ec0769ddd7ad2bb4124de8a7b1f133e31c39d` · Windows 10/11 x64 · 许可 MIT
+**校验信息**：版本 `v1.1.2`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.1.2.exe` · 约 580 MB（580,497,499 字节）· SHA-256 `da0080a2a945942a0bce7986d04fa034734ea9fc404fd946dcc0939f78d38f29` · Windows 10/11 x64 · 许可 MIT
