@@ -18,6 +18,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import guarded_stdio
+
 ROOT = Path(__file__).resolve().parent.parent
 SPIDER_DIR = ROOT / "services" / "spider-service"
 
@@ -29,8 +31,11 @@ def spider(monkeypatch, tmp_path):
     monkeypatch.setenv("ACCOUNT_STATE_DIR", str(tmp_path / "state"))
     sys.path.insert(0, str(SPIDER_DIR))
     sys.modules.pop("main", None)
+    # main 的模块链会导入 src/ai_handler.py（导入期重建 sys.stdout/stderr），
+    # 必须罩导入期保护，否则拆坏 pytest 捕获流（见 conftest.guarded_stdio）。
     try:
-        mod = importlib.import_module("main")
+        with guarded_stdio():
+            mod = importlib.import_module("main")
     except Exception as e:  # 缺 playwright 等依赖时跳过而非报红
         pytest.skip(f"spider-service 依赖不全，跳过: {e}")
     yield mod

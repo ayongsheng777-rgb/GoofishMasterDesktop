@@ -182,3 +182,16 @@ body {
 .disclaimer-box strong { display: block; color: var(--text); margin-bottom: 6px; font-size: 13px; }
 .disclaimer-box p { margin: 0 0 6px; font-size: 12px; line-height: 1.6; color: var(--text-muted); }
 .disclaimer-box p:last-child { margin-bottom: 0; }
+
+/* 更新提示横幅 */
+.update-banner {
+  display: flex; align-items: center; gap: 12px;
+  margin: 0 24px; padding: 10px 16px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  color: #fff; border-radius: 12px; font-size: 13px;
+  box-shadow: var(--shadow);
+}
+.update-banner.hidden { display: none; }
+.update-banner .update-text { flex: 1; }
+.update-banner .update-text b { font-size: 14px; }
+.update-banner .btn-sm { padding: 4px 12px; font-size: 12px; }

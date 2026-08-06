@@ -14,13 +14,28 @@ from urllib.parse import urlencode, urlparse, urlunparse, parse_qsl
 import requests
 
 # 设置标准输出编码为UTF-8，解决Windows控制台编码问题
-# 注意：必须用 TextIOWrapper 重新包装，绝不能 detach 底层 buffer——
-# detach 会撕裂 buffer，导致 uvicorn/logging 等持有旧引用写入时抛
-# ValueError: underlying buffer has been detached（日志崩塌，排查不可见）
+# 注意三条铁律：
+# 1) 绝不能 detach 底层 buffer——会撕裂 buffer，uvicorn/logging 等持有旧引用
+#    写入时抛 ValueError: underlying buffer has been detached（日志崩塌）。
+# 2) 也不能直接 TextIOWrapper(sys.stdout.buffer) 接管所有权——新 wrapper 被
+#    GC 时会连带关闭底层 fd；若那是 pytest 捕获流或宿主进程的流，直接拆坏
+#    （I/O operation on closed file）。
+# 3) 正确做法：os.dup 复制 fd 后再包装——写入仍落到同一控制台/文件，但
+#    wrapper 只拥有 fd 副本，GC 关闭的是副本，底层流毫发无伤。
 if sys.platform.startswith('win'):
     import io as _io
-    sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-    sys.stderr = _io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+    import os as _os
+
+    def _rewrap_utf8(stream):
+        try:
+            return _os.fdopen(_os.dup(stream.fileno()), "w", encoding="utf-8")
+        except (AttributeError, OSError, _io.UnsupportedOperation):
+            # 无真实 fd 的环境（windowed 冻结包 None 流 / IDE 重定向 /
+            # pytest sys 级捕获的 BytesIO）保持原样，不强行包装
+            return stream
+
+    sys.stdout = _rewrap_utf8(sys.stdout)
+    sys.stderr = _rewrap_utf8(sys.stderr)
 
 from src.config import (
     AI_DEBUG_MODE,

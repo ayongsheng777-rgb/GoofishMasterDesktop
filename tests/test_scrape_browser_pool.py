@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+from conftest import guarded_stdio
+
 ROOT = Path(__file__).resolve().parent.parent
 SPIDER_DIR = ROOT / "services" / "spider-service"
 
@@ -25,19 +27,13 @@ def scraper(monkeypatch, tmp_path):
     sys.path.insert(0, str(SPIDER_DIR))
     for m in ("src.scraper", "src.ai_handler"):
         sys.modules.pop(m, None)
-    # src/ai_handler.py 导入期会 detach sys.stdout/stderr 重建 utf-8 writer，
-    # 会拆坏 pytest 的捕获流——导入期间换上一次性替身流（TextIOWrapper
-    # 支持 detach），导完还原。
-    import io
-    real_out, real_err = sys.stdout, sys.stderr
-    sys.stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
-    sys.stderr = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    # src/ai_handler.py 导入期会重建 sys.stdout/stderr，必须罩导入期保护，
+    # 否则拆坏 pytest 捕获流（见 conftest.guarded_stdio）。
     try:
-        mod = importlib.import_module("src.scraper")
+        with guarded_stdio():
+            mod = importlib.import_module("src.scraper")
     except Exception as e:  # 缺 playwright 等依赖时跳过而非报红
         pytest.skip(f"scraper 依赖不全，跳过: {e}")
-    finally:
-        sys.stdout, sys.stderr = real_out, real_err
     yield mod
     sys.modules.pop("src.scraper", None)
     if str(SPIDER_DIR) in sys.path:

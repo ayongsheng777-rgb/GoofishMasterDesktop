@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import sys
 from pathlib import Path
 
@@ -19,6 +21,29 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+@contextlib.contextmanager
+def guarded_stdio():
+    """导入期 stdio 保护。
+
+    `services/spider-service/src/ai_handler.py` 在 **import 时**用
+    `io.TextIOWrapper(sys.stdout.buffer)` 重建 stdout/stderr。被包装的
+    wrapper 一旦 GC，会连带关闭底层 buffer——若那是 pytest 的捕获流，
+    后续所有 capture 读写都会炸 `ValueError: I/O operation on closed file`
+    （表现为本测试文件之后的用例成批 ERROR）。
+
+    对策：导入期间换成一次性 BytesIO 替身流，让被关闭的是替身，导完还原。
+    任何会（间接）导入 spider-service 模块链的 fixture 都必须用它包裹
+    `importlib.import_module(...)` 调用。
+    """
+    real_out, real_err = sys.stdout, sys.stderr
+    sys.stdout = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    sys.stderr = io.TextIOWrapper(io.BytesIO(), encoding="utf-8")
+    try:
+        yield
+    finally:
+        sys.stdout, sys.stderr = real_out, real_err
 
 
 @pytest.fixture()

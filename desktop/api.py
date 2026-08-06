@@ -17,6 +17,15 @@ CFG = cfg_mod.load_config()
 _LOCK = threading.Lock()
 
 
+def _version_tuple(v: str) -> tuple:
+    """'1.10.2' -> (1, 10, 2)；非数字段按 0 处理，永不抛异常。"""
+    out = []
+    for part in str(v).split("."):
+        digits = "".join(ch for ch in part if ch.isdigit())
+        out.append(int(digits) if digits else 0)
+    return tuple(out)
+
+
 def _status() -> List[Dict[str, Any]]:
     out = []
     for svc in launcher.SERVICES:
@@ -137,3 +146,46 @@ class Api:
                 webbrowser.open(p.as_uri())
         except Exception:
             pass
+
+    def open_url(self, url: str) -> None:
+        """用系统默认浏览器打开指定 URL（仅允许 http/https，防 JS 侧注入 file://）。"""
+        try:
+            import webbrowser
+            if isinstance(url, str) and url.startswith(("http://", "https://")):
+                webbrowser.open(url)
+        except Exception:
+            pass
+
+    def check_update(self) -> Dict[str, Any]:
+        """版本检查 + 更新提示（更新通道第一阶段：只提示，不自动下载）。
+
+        查询 GitHub Releases 最新 tag 与 common.config.APP_VERSION 比较。
+        任何网络/解析异常都静默返回 ok=False，前端据此保持横幅隐藏——
+        绝不让版本检查影响控制台可用性。
+        """
+        result: Dict[str, Any] = {
+            "ok": False, "current": cfg_mod.APP_VERSION,
+            "latest": None, "update_available": False, "url": "", "error": "",
+        }
+        try:
+            import requests
+            api_url = f"https://api.github.com/repos/{cfg_mod.GITHUB_REPO}/releases/latest"
+            # 用户若已为境外 AI 配了代理，顺手复用（GitHub 在境内也常需代理）
+            proxy = (CFG.get("ai") or {}).get("proxy_url") or None
+            proxies = {"http": proxy, "https": proxy} if proxy else None
+            resp = requests.get(api_url, timeout=5, proxies=proxies,
+                                headers={"Accept": "application/vnd.github+json"})
+            if resp.status_code != 200:
+                result["error"] = f"HTTP {resp.status_code}"
+                return result
+            data = resp.json()
+            latest = str(data.get("tag_name") or "").lstrip("vV")
+            result.update(ok=True, latest=latest,
+                          url=str(data.get("html_url") or ""))
+            result["update_available"] = (
+                _version_tuple(latest) > _version_tuple(cfg_mod.APP_VERSION)
+            )
+            return result
+        except Exception as e:  # 断网/超时/DNS/代理解析失败等一律静默
+            result["error"] = str(e)[:120]
+            return result

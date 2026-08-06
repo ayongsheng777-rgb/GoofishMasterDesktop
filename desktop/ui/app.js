@@ -162,6 +162,20 @@ function refreshPreflight() {
   api.check_prerequisites().then(renderPreflight).catch((e) => console.error(e));
 }
 
+// ---------- 版本检查（更新提示） ----------
+let _releaseUrl = "";
+function checkUpdate() {
+  if (!api || !api.check_update) return;
+  api.check_update().then((r) => {
+    // 检查失败 / 已是最新 / 仓库未公开（404）→ 一律保持横幅隐藏，不打扰
+    if (!r || !r.ok || !r.update_available) return;
+    _releaseUrl = r.url || "";
+    el("updateLatest").textContent = "v" + r.latest;
+    el("updateCurrent").textContent = "v" + r.current;
+    el("updateBanner").classList.remove("hidden");
+  }).catch(() => { /* 静默：版本检查绝不影响控制台 */ });
+}
+
 // ---------- 事件绑定 ----------
 function bindEvents() {
   el("toggleBtn").addEventListener("click", () => {
@@ -186,6 +200,13 @@ function bindEvents() {
     if (api) api.open_github();
     else window.open("https://github.com/ayongsheng777-rgb/GoofishMasterDesktop", "_blank");
   });
+  el("updateGo").addEventListener("click", () => {
+    if (api && _releaseUrl) api.open_url(_releaseUrl);
+    else if (_releaseUrl) window.open(_releaseUrl, "_blank");
+  });
+  el("updateDismiss").addEventListener("click", () => {
+    el("updateBanner").classList.add("hidden");
+  });
 }
 
 // ---------- 启动 ----------
@@ -195,6 +216,7 @@ whenReady(() => {
   refreshLog();
   refreshConfig();
   refreshPreflight();
+  checkUpdate();
 
   statusTimer = setInterval(() => {
     refreshStatus();

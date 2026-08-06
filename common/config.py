@@ -60,6 +60,14 @@ APP_DIR = _app_dir()
 CONFIG_PATH = APP_DIR / "config" / "config.json"
 EXAMPLE_PATH = ROOT / "config.example.json"
 
+# 当前版本号（check_update 用）。**发版时务必与 GoofishMasterDesktop.iss 的
+# MyAppVersion 同步**——安装器不会把 .iss 打进包里，运行期只能读这里。
+APP_VERSION = "1.1.2"
+
+# 版本检查目标仓库（releases/latest）。若仓库将来转 Private，匿名 API 会
+# 404，check_update 静默判为"检查失败"，不影响控制台任何功能。
+GITHUB_REPO = "ayongsheng777-rgb/GoofishMasterDesktop"
+
 # 服务名 → 默认端口（与原 Docker 8901-8904 偏移 +10，避免与本机运行的原项目冲突）
 DEFAULT_PORTS = {
     "feishu_agent": 8911,

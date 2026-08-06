@@ -388,6 +388,15 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **捐赠二维码随文档打包**：`微信收款.png`/`支付宝收款.jpg` 拷入 `desktop/ui/` 并 git 跟踪（wechat-pay.png / alipay-pay.jpg），随构建进 `_internal`；RELEASE_BODY 另引用 release 资产 donate-wechat.png / donate-alipay.jpg（来自 assets/）。
 - **已发布 v1.1.1**：commit `f38d8a9` 已 push main；GitHub Release v1.1.1 已建，`gh release create` 建壳 + curl 直传（代理，避免 gh 上传 500MB+ 报 400）上传安装包与两张捐赠图。
 
+## 8.9 2026-08-06 下午 项目扫描修复批（测试崩塌根因 + 更新通道① + 目录清理）
+
+项目扫描报告（`D:\WorkBuddy\GoofishMasterDesktop-项目扫描报告.html`）驱动的修复：
+
+1. **测试崩塌根因修复（ai_handler stdout 三铁律）**：pytest 1 失败 + 11 错误的根因不是 v1.1.2 的 `detach→TextIOWrapper` 本身，而是 `TextIOWrapper(sys.stdout.buffer)` **接管了 pytest 捕获流底层 fd 的所有权**——pytest fd 捕获下 `sys.stdout` 就是 FDCapture 的 tmpfile（EncodedFile 包真 OS 文件），新 wrapper 被 GC 时连带关闭该 fd → 全局捕获流崩坏（`I/O operation on closed file`）。且 ai_handler 存在**懒导入路径**（测试运行期才首次 import），fixture 导入期保护罩不住。根治（`services/spider-service/src/ai_handler.py`）：改为 `os.fdopen(os.dup(stream.fileno()), "w", encoding="utf-8")`——写入仍落同一控制台/文件，但 wrapper 只持有 fd 副本，GC 关闭的是副本；无真实 fd 的环境（None 流/BytesIO 捕获）异常兜底保持原样。**三铁律**：不 detach（撕裂 buffer）、不直接包 buffer（抢 fd 所有权）、要 dup 后再包。配套：`tests/conftest.py` 新增公共 `guarded_stdio()` 上下文管理器（BytesIO 替身流），`test_scrape_browser_pool.py` 收敛复用、`test_spider_browser_lifecycle.py` 补罩。修后 **80 passed / 4 skipped / 0 failed**（4 skip 为 JobObject 沙箱拦截的环境性跳过）。
+2. **更新通道①版本检查+提示（落地 §8.6 规划）**：`common/config.py` 新增 `APP_VERSION`（**发版须与 .iss MyAppVersion 同步**，运行期读不到 .iss）与 `GITHUB_REPO`；`desktop/api.py` 新增 `check_update()`（查 GitHub `releases/latest`，复用 `ai.proxy_url` 代理，5s 超时，任何异常静默 `ok=False`）+ `open_url()`（仅放行 http/https）；`desktop/ui/` 顶部新增更新横幅（仅 `update_available=true` 时显示，检查失败/已最新均隐藏）。实测：仓库匿名 API 可读，latest=v1.1.1 < 本地 1.1.2，正确不提示。
+3. **目录清理**：删 `_build_v112/`（v1.1.2 PyInstaller 中间目录，产物已入 release/ 与 installer/）；`.gitignore` 补 `_build*/` 防再次入库。
+4. **对比 GitHub 发现**：① 仓库实际是 **Public**（memory 旧记录 Private 已过时）；② **v1.1.2 tag 在、Release 从未创建**——README 下载链接 404，需补建 Release 并传安装包（curl+代理直传，同 v1.1.1 法）。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。

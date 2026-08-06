@@ -16,6 +16,7 @@ build/
 dist/
 release/
 .build/
+_build*/
 build_p1.log
 installer/
 *.log

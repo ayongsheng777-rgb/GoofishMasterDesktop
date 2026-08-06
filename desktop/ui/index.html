@@ -34,6 +34,15 @@
       </div>
     </header>
 
+    <!-- 更新提示横幅（检测到新版本时才显示；检查失败/已最新均保持隐藏） -->
+    <div id="updateBanner" class="update-banner hidden">
+      <span class="update-text">
+        🎉 发现新版本 <b id="updateLatest"></b>（当前 <span id="updateCurrent"></span>）
+      </span>
+      <button id="updateGo" class="btn btn-primary btn-sm">前往下载</button>
+      <button id="updateDismiss" class="btn btn-ghost btn-sm">忽略</button>
+    </div>
+
     <!-- 主体 -->
     <main class="main">
       <!-- 环境检测 -->
