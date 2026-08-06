@@ -94,6 +94,11 @@ def parse_command(text: str) -> Dict[str, Any]:
         target = del_match.group(1).strip()
         return {"action": "delete_task", "target": target}
 
+    # Stop search command — 必须先于通用「停止」正则：否则「停止搜索」会被
+    # stop_match 吞成 target="搜索" 去停监控任务，实际什么都停不掉。
+    if re.fullmatch(r'(?:停止|取消)\s*搜索(?:任务)?', text):
+        return {"action": "stop_search"}
+
     # Stop command
     stop_match = re.match(r'(?:停止|取消)\s*(?:任务|监控)?\s*(.+)', text)
     if stop_match:
@@ -337,6 +342,7 @@ def format_help() -> str:
 
 📋 管理指令：
 • 任务列表 — 查看所有任务
+• 停止搜索 — 停止正在进行的一次性搜索
 • 停止 [任务名] — 停止监控
 • 删除 [任务名] — 删除监控任务（含去重记录）
 • 设置 [任务名] 间隔XX分钟 — 修改监控间隔
@@ -628,6 +634,7 @@ def format_help_card() -> dict:
             {"tag": "div", "text": {"tag": "lark_md", "content":
                 "**📋 管理指令**\n"
                 "• 任务列表 — 查看所有任务\n"
+                "• 停止搜索 — 停止正在进行的一次性搜索\n"
                 "• 停止 [任务名] — 停止监控\n"
                 "• 删除 [任务名] — 删除监控任务\n"
                 "• 设置 [任务名] 间隔XX分钟 / 阈值XX — 修改任务参数\n"

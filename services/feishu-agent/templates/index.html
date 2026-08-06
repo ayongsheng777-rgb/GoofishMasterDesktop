@@ -848,18 +848,22 @@
             const ls = p.last_search || {};
             let html = '';
             if (ls.keyword) {
-                // 搜索三态：running（采集中）/ failed / done（旧数据无 status 视为 done）
+                // 搜索四态：running（采集中）/ failed / stopped / done（旧数据无 status 视为 done）
                 const st = ls.status || 'done';
                 const meta = st === 'running'
                     ? `${ls.time || ''} · 进行中（采集+AI分析约 10 分钟）· 一次性指令`
                     : st === 'failed'
                         ? `${ls.time || ''} · 执行失败，请重试 · 一次性指令`
-                        : `${ls.time || ''} · ${ls.total ?? 0} 结果 · ${ls.recommended ?? 0} 推荐 · 一次性指令`;
+                        : st === 'stopped'
+                            ? `${ls.time || ''} · 已手动停止 · 一次性指令`
+                            : `${ls.time || ''} · ${ls.total ?? 0} 结果 · ${ls.recommended ?? 0} 推荐 · 一次性指令`;
                 const badge = st === 'running'
                     ? '<span class="task-status doing">⏳ 进行中</span>'
                     : st === 'failed'
                         ? '<span class="task-status fail">✗ 失败</span>'
-                        : '<span class="task-status run">已完成</span>';
+                        : st === 'stopped'
+                            ? '<span class="task-status stop">■ 已停止</span>'
+                            : '<span class="task-status run">已完成</span>';
                 html += `<div class="task-row">
                     <span class="task-type t-search">搜索</span>
                     <span class="task-name">${ls.keyword}</span>

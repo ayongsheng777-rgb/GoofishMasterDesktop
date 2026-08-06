@@ -127,3 +127,13 @@ class Api:
             webbrowser.open("https://github.com/ayongsheng777-rgb/GoofishMasterDesktop")
         except Exception:
             pass
+
+    def open_help(self) -> None:
+        """用系统默认浏览器打开使用说明文档（desktop/ui/help.html）。"""
+        try:
+            import webbrowser
+            p = cfg_mod.ROOT / "desktop" / "ui" / "help.html"
+            if p.exists():
+                webbrowser.open(p.as_uri())
+        except Exception:
+            pass

@@ -147,6 +147,10 @@ _LAST_SEARCH_FILE = db.DATA_DIR / "last_search.json"
 async def _save_last_search(meta: Dict[str, Any]) -> None:
     global _last_search
     _last_search = dict(meta)
+    # 搜索到终态（failed/done/stopped）→ 释放「停止搜索」控制块的占用。
+    # 所有终态路径都经此函数，在此统一复位比逐 return 点撒复位更不易漏。
+    if meta.get("status") in ("failed", "done", "stopped"):
+        _search_ctl["phase"] = None
     # 落盘持久化（优先，重启可恢复）
     try:
         db.DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -813,6 +817,41 @@ async def analyze_batch(request: BatchAnalyzeRequest, background_tasks: Backgrou
     }
 
 
+# 「停止搜索」协作式取消：交互式搜索同一时刻只有一个（spider 侧有全局
+# 采集锁串行），单个控制块即可。/api/search/stop 置 cancelled 并通知
+# spider 中断采集；搜索链路在阶段边界（采集返回后 / AI 分析前）检查，
+# 命中即中止并如实登记 stopped（区别于 failed/done，不误导用户）。
+_search_ctl: Dict[str, Any] = {"keyword": None, "phase": None, "cancelled": False}
+
+
+async def _search_stopped_response(keyword: str) -> dict:
+    await _save_last_search({
+        "type": "search", "keyword": keyword,
+        "time": time.strftime("%Y-%m-%d %H:%M"),
+        "status": "stopped",
+    })
+    return {"success": False, "stopped": True,
+            "error": f"搜索「{keyword}」已被手动停止"}
+
+
+@app.post("/api/search/stop")
+async def pipeline_search_stop():
+    """手动停止当前进行中的交互式搜索（飞书「停止搜索」/ WebUI）。"""
+    if _search_ctl.get("phase") is None:
+        return {"success": False, "message": "当前没有进行中的搜索任务"}
+    _search_ctl["cancelled"] = True
+    keyword = _search_ctl.get("keyword") or ""
+    # 采集占搜索时长的绝大部分——同步通知 spider 中断（失败不阻断，
+    # pipeline 侧的阶段边界检查兜底）
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(f"{SPIDER_URL}/api/search/stop")
+    except Exception as e:
+        logger.debug("spider 停止通知失败（忽略）: %r", e)
+    logger.info("Pipeline search stop requested: keyword='%s'", keyword)
+    return {"success": True, "message": f"已发送停止指令：{keyword}"}
+
+
 @app.post("/api/pipeline/search")
 async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
     """Full pipeline: search via spider → analyze → notify.
@@ -860,6 +899,8 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
         "time": time.strftime("%Y-%m-%d %H:%M"),
         "status": "running",
     })
+    # 占用「停止搜索」控制块（终态由 _save_last_search 统一复位）
+    _search_ctl.update(keyword=keyword, phase="crawl", cancelled=False)
 
     # Step 1: Trigger spider search（V1 引擎逐商品抓详情，单页约 8 分钟）
     # 注意：交互式搜索只用 1 页（约 30 条）——2 页实测 949s 会打穿 900s 超时
@@ -882,6 +923,13 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
         })
         return {"success": False,
                 "error": f"采集超时或失败({type(e).__name__})，闲鱼页面响应较慢，请稍后重试"}
+
+    # 停止指令边界检查（采集被 /api/search/stop 中断 → spider 回 stopped；
+    # 或采集完成但用户已叫停）→ 不进分析/推送，如实登记 stopped
+    if spider_data.get("status") == "stopped" or (
+            _search_ctl["cancelled"] and _search_ctl["keyword"] == keyword):
+        logger.info("Pipeline search stopped by user: keyword='%s'", keyword)
+        return await _search_stopped_response(keyword)
 
     # 登录态过期要如实告知（真实解法是重新扫码），不能混同「未找到商品」
     # ——2026-08-03 实锤：登录过期返回 0 结果，用户被误导去换关键词
@@ -958,6 +1006,11 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
         f"正在对前 {analyze_count} 件做 AI 分析（卖家/风险/价格三维），"
         f"预计 {max(1, analyze_count * 8 // 60) + 1} 分钟…\n"
         f"高分商品分析完自动推送卡片")
+
+    # Step 2 前最后一次停止边界检查（过滤耗时极短，主要拦截采集期间的叫停）
+    if _search_ctl["cancelled"] and _search_ctl["keyword"] == keyword:
+        logger.info("Pipeline search stopped before analysis: '%s'", keyword)
+        return await _search_stopped_response(keyword)
 
     # Step 2: AI Analysis（并发：三维已并行，外层用 gather 真正并发，
     # 信号量 _ai_semaphore 自动限流；单件异常隔离不中断整批）

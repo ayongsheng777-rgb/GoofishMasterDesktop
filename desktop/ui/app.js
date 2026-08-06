@@ -177,6 +177,10 @@ function bindEvents() {
   el("openData").addEventListener("click", () => api.open_data_dir());
   el("openFrontend").addEventListener("click", () => api.open_frontend());
   el("aboutBtn").addEventListener("click", () => el("aboutModal").classList.remove("hidden"));
+  el("helpBtn").addEventListener("click", () => {
+    if (api) api.open_help();
+    else window.open("help.html", "_blank");
+  });
   el("githubLink").addEventListener("click", (e) => {
     e.preventDefault();
     if (api) api.open_github();

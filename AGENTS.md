@@ -372,6 +372,16 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **托盘菜单增强**（`desktop/app.py`）：新增「打开管理后台」（系统浏览器，端口随 config）与「查看日志」（资源管理器开 data/logs）。「清理缓存/更新组件」未采纳（无定义/更新通道未建）。
 - 关于弹层加品牌 logo（`desktop/ui/logo.png`，256px/113KB，源图 `GoofishMasterDesktop.png` 1024px 存根目录）。
 
+**同日第三批（用户实测反馈驱动，v1.1.1 候选）**：
+- **双系统并行冲突排查（非代码 BUG）**：Docker 版 goofish-v2 与桌面版共用同一飞书应用 → 长连接互踢、指令被 Docker 版接走（任务建到 Docker PG，桌面 WebUI 不可见）。处置：Docker 版飞书凭证清空（credentials.json 已不存在、env 无 FEISHU_APP_ID/SECRET），桌面版独占飞书消息；Docker 栈重启后 bot 无凭证不再连接，两系统可并行。
+- **「重新配置」彻底清理**（`feishu-agent/main.py` `/api/reconfigure` 重写 + `feishu_bot.py` 新增 `stop()`）：旧实现只删 credentials.json，残留 ① bot WS 长连接仍在线 ② 扫码轮询任务可回写旧凭证 ③ config.json 的 feishu.*（扫码成功回写，BUG-1 引入）重启后重新注入。现五步全清：bot.stop() 断连（lark SDK 无公开 stop，用私有 `_disconnect`，尽力而为不抛出）→ 取消 poll_tasks → 删 credentials.json/configured_open_id.json → 清 config.json feishu.* → 清进程 env。
+- **「停止搜索」命令**：spider `/api/search/sync` 登记任务句柄 + 新增 `/api/search/stop`（cancel 沿 wait_for → scrape CancelledError 优雅退出，回 `status=stopped`）；pipeline 新增 `_search_ctl` 控制块 + `/api/search/stop`（置 cancelled + 联动 spider），链路在采集返回后/AI 分析前两处边界检查，终态由 `_save_last_search`（status∈failed/done/stopped）统一复位控制块；feishu 指令解析加 `stop_search`（**必须先于通用「停止」正则**，否则被吞成 target="搜索"），帮助文案 3 处同步；WebUI 任务中心搜索加第四态 stopped 渲染。
+- **窗口最小化至托盘**（`desktop/app.py`）：pywebview 6.2.1 `window.events.minimized += handler` → hide；旧版无 events API 则走系统默认。
+- **关于弹层**：logo 下加渐变色高亮文字「闲鱼圣手」。
+- **使用说明文档**：新增 `desktop/ui/help.html`（七个板块：OTP 验证器/飞书扫码与快捷指令菜单/代理设置/模型平台注册/模型配置/闲鱼登录/指令帮助，独立内联样式静态页）；关于弹层「知道了」旁加「📖 使用说明」按钮 → `desktop/api.py` `open_help()` 用系统浏览器打开（`cfg_mod.ROOT/desktop/ui/help.html` 的 file:// URI，pywebview 内不导航）。
+- **已安装实例热更新**：上述数据文件已 cp 进 `D:\GoofishMasterDesktop\_internal\`（16 个文件），重启桌面应用即生效；**launcher 层改动（Job Object 接入、看门狗熔断）冻结在 exe 内，需重打包才对安装实例生效**。
+- **Docker 版 PG 里残留「桨板监控」任务**：栈重启后会继续跑但无飞书凭证推送不出去，如需清理进容器删任务。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。

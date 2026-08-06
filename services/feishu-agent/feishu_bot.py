@@ -239,6 +239,21 @@ class FeishuBot:
         finally:
             self._running = False
 
+    def stop(self) -> None:
+        """断开 WebSocket 长连接并停止机器人（供「重新配置」等场景调用）。
+
+        lark SDK 未公开 stop 接口，仅有私有 `_disconnect`——尽力而为，
+        失败不抛出；调用方随后丢弃 bot 引用，线程自然随连接断开退出。
+        """
+        self._running = False
+        ws, self._ws_client = self._ws_client, None
+        if ws is not None:
+            try:
+                ws._disconnect()
+                logger.info("飞书 WebSocket 已断开")
+            except Exception as exc:
+                logger.warning("断开飞书 WebSocket 异常（忽略）: %s", exc)
+
 
 def _extract_post_text(content: Dict[str, Any]) -> str:
     parts = []

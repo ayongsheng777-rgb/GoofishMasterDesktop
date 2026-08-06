@@ -154,6 +154,18 @@ def run():
         except Exception:
             pass
 
+        # 最小化窗口 → 同样隐藏到托盘（不占任务栏；托盘「显示控制台」召回）
+        def on_minimized():
+            try:
+                window.hide()
+            except Exception:
+                pass
+
+        try:
+            window.events.minimized += on_minimized
+        except Exception:
+            pass  # 旧版 pywebview 无 events API，最小化走系统默认行为
+
         # 托盘图标：优先 app.ico（与 exe / 安装器统一品牌），缺失回退 logo-256.png
         icon_img = None
         for cand in (icon_path, cfg_mod.ROOT / "services" / "feishu-agent" / "static" / "logo-256.png"):

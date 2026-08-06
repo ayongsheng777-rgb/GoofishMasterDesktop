@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>闲鱼圣手 · 使用说明</title>
+<style>
+  :root {
+    --ink: #1f2329; --ink2: #5f6368; --ink3: #9aa0a6;
+    --brand: #667EEA; --brand2: #764BA2;
+    --bg: #f6f8fc; --card: #ffffff; --line: #e3eaf5;
+    --ok: #188038; --warn: #b06000; --err: #d93025;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--ink); line-height: 1.75;
+  }
+  .hero {
+    background: linear-gradient(135deg, var(--brand), var(--brand2));
+    color: #fff; padding: 44px 24px 36px; text-align: center;
+  }
+  .hero img { width: 88px; height: 88px; border-radius: 20px; box-shadow: 0 6px 18px rgba(0,0,0,.25); }
+  .hero h1 { font-size: 28px; letter-spacing: 3px; margin-top: 14px; }
+  .hero p { opacity: .9; margin-top: 6px; font-size: 14px; }
+  .layout { max-width: 1080px; margin: 0 auto; padding: 24px; display: flex; gap: 24px; align-items: flex-start; }
+  nav {
+    position: sticky; top: 24px; flex: 0 0 220px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 14px; padding: 14px;
+  }
+  nav a {
+    display: block; padding: 9px 12px; border-radius: 9px; color: var(--ink2);
+    text-decoration: none; font-size: 14px;
+  }
+  nav a:hover { background: #eef2fb; color: var(--brand); }
+  main { flex: 1; min-width: 0; }
+  section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+    padding: 26px 28px; margin-bottom: 22px;
+  }
+  h2 { font-size: 20px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 2px solid #eef2fb; }
+  h3 { font-size: 16px; margin: 18px 0 8px; color: var(--brand2); }
+  p, li { font-size: 14px; color: var(--ink); }
+  ul, ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 5px 0; }
+  code {
+    background: #f1f4fa; border: 1px solid var(--line); border-radius: 5px;
+    padding: 1px 6px; font-family: Consolas, "Courier New", monospace; font-size: 13px;
+    color: #c7254e;
+  }
+  a.ext { color: var(--brand); text-decoration: none; }
+  a.ext:hover { text-decoration: underline; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 9px 12px; text-align: left; }
+  th { background: #f4f7fd; font-weight: 600; }
+  .tip, .warn-box {
+    border-radius: 10px; padding: 12px 16px; margin: 12px 0; font-size: 13.5px;
+  }
+  .tip { background: #e8f5e9; border: 1px solid #b9e0bd; color: #1b5e20; }
+  .warn-box { background: #fff7e6; border: 1px solid #ffe0a3; color: #7a4a00; }
+  .cmd {
+    display: inline-block; background: #eef2fb; color: var(--brand2);
+    border-radius: 6px; padding: 1px 8px; font-size: 13px; margin: 1px 0;
+  }
+  .step { display: flex; gap: 12px; margin: 10px 0; }
+  .step .n {
+    flex: 0 0 26px; height: 26px; border-radius: 50%; background: var(--brand);
+    color: #fff; font-size: 13px; font-weight: 700; display: flex;
+    align-items: center; justify-content: center; margin-top: 2px;
+  }
+  footer { text-align: center; color: var(--ink3); font-size: 12.5px; padding: 26px 0 40px; }
+  @media (max-width: 860px) {
+    .layout { flex-direction: column; }
+    nav { position: static; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <img src="logo.png" alt="闲鱼圣手">
+  <h1>闲鱼圣手</h1>
+  <p>GoofishMasterDesktop · 桌面独立运行端 · 使用说明</p>
+</div>
+
+<div class="layout">
+  <nav>
+    <a href="#otp">① OTP 验证器</a>
+    <a href="#feishu">② 飞书扫码与指令</a>
+    <a href="#proxy">③ 代理设置</a>
+    <a href="#api-keys">④ 模型平台注册</a>
+    <a href="#model-cfg">⑤ 模型配置说明</a>
+    <a href="#xianyu">⑥ 闲鱼登录</a>
+    <a href="#help">⑦ 指令帮助</a>
+  </nav>
+
+  <main>
+    <!-- ============ ① OTP 验证器 ============ -->
+    <section id="otp">
+      <h2>① OTP 验证器（管理后台登录保护）</h2>
+      <p>管理后台（<code>http://127.0.0.1:8911</code>）开启了 TOTP 动态口令保护。首次访问会显示一个二维码 / 密钥，用下面任意一款验证器 App 扫码添加，之后每次登录输入 App 里显示的 6 位动态码即可。验证器账户名为 <code>GoofishMasterDesktop</code>。</p>
+      <h3>推荐验证器（任选其一）</h3>
+      <table>
+        <tr><th>验证器</th><th>平台</th><th>获取方式</th><th>备注</th></tr>
+        <tr>
+          <td><strong>腾讯云身份验证器</strong></td>
+          <td>微信（小程序）</td>
+          <td>微信内搜索小程序「腾讯云身份验证器」，免安装</td>
+          <td>国内最省事，推荐首选</td>
+        </tr>
+        <tr>
+          <td><strong>Google Authenticator</strong></td>
+          <td>Android / iOS</td>
+          <td><a class="ext" href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2" target="_blank">Google Play</a> / App Store 搜索「Google Authenticator」</td>
+          <td>国际通用，需应用商店可访问</td>
+        </tr>
+        <tr>
+          <td><strong>Microsoft Authenticator</strong></td>
+          <td>Android / iOS</td>
+          <td><a class="ext" href="https://www.microsoft.com/zh-cn/security/mobile-authenticator-app" target="_blank">微软官网下载页</a> / 各应用商店</td>
+          <td>支持云备份换机恢复</td>
+        </tr>
+        <tr>
+          <td><strong>Authenticator Pro</strong></td>
+          <td>Android</td>
+          <td><a class="ext" href="https://github.com/jamie-mh/AuthenticatorPro" target="_blank">GitHub 发布页</a>（开源免费）</td>
+          <td>开源、可本地备份</td>
+        </tr>
+      </table>
+      <div class="tip">💡 扫码失败时可选择「手动输入密钥」：把页面上那串 Base32 密钥（形如 <code>JBSWY3DPEHPK3PXP</code>）填进验证器即可，效果相同。动态码每 30 秒刷新一次，请确保电脑与手机时间大致准确（误差过大会提示口令错误）。</div>
+      <div class="warn-box">⚠️ 验证器添加完成后，建议把密钥字符串抄存一份在安全的地方。手机丢失 / 换机没有备份的话，需要删除数据目录下的 TOTP 配置后重新设置。</div>
+    </section>
+
+    <!-- ============ ② 飞书 ============ -->
+    <section id="feishu">
+      <h2>② 飞书扫码登录 与 快捷指令菜单配置</h2>
+      <h3>2.1 创建飞书自建应用（一次性）</h3>
+      <div class="step"><div class="n">1</div><p>打开 <a class="ext" href="https://open.feishu.cn/" target="_blank">飞书开放平台</a>，登录后进入「开发者后台」→「创建企业自建应用」，名称随意（如「闲鱼圣手」）。</p></div>
+      <div class="step"><div class="n">2</div><p>在应用的「凭证与基础信息」页复制 <code>App ID</code> 与 <code>App Secret</code>。</p></div>
+      <div class="step"><div class="n">3</div><p>「权限管理」中开通消息权限：<code>im:message</code>、<code>im:message:send_as_bot</code>、<code>im:resource</code>（发送图片/卡片需要）。</p></div>
+      <div class="step"><div class="n">4</div><p>「事件订阅」的订阅方式选择 <strong>使用长连接接收事件</strong>（本项目优势：无需公网 IP / 回调域名），添加事件「接收消息 im.message.receive_v1」。</p></div>
+      <div class="step"><div class="n">5</div><p>「应用发布」中创建版本并发布（企业内自建应用一般自动通过），然后在飞书里找到这个机器人，发一条消息建立会话。</p></div>
+      <h3>2.2 在本软件中绑定</h3>
+      <p>打开管理后台「🏠 首页 / 飞书配置」卡片，点击「获取二维码」→ 用飞书 App 扫码 → 按提示填入 App ID / Secret 完成绑定。绑定成功后机器人自动建立长连接，你的飞书账号（open_id）会登记为推送对象。</p>
+      <div class="tip">💡 「重新配置」按钮会<strong>彻底清空</strong>飞书配置（断开长连接、删除凭证文件、清空 config.json 中的 feishu 段），无残留，可放心重配。</div>
+      <h3>2.3 快捷指令菜单（免记指令）</h3>
+      <p>想让机器人输入框上方出现可点击的快捷菜单：</p>
+      <div class="step"><div class="n">1</div><p>开发者后台 → 你的应用 →「应用能力」→「机器人」→ 找到「快捷指令 / 菜单」配置项。</p></div>
+      <div class="step"><div class="n">2</div><p>按下表添加菜单项（「指令内容」即点击后自动发送的文本）：</p></div>
+      <table>
+        <tr><th>菜单名</th><th>发送内容</th></tr>
+        <tr><td>任务列表</td><td><code>任务列表</code></td></tr>
+        <tr><td>系统状态</td><td><code>状态</code></td></tr>
+        <tr><td>停止搜索</td><td><code>停止搜索</code></td></tr>
+        <tr><td>登录闲鱼</td><td><code>登录闲鱼</code></td></tr>
+        <tr><td>帮助</td><td><code>帮助</code></td></tr>
+      </table>
+      <div class="step"><div class="n">3</div><p>保存并发布新版本。之后与机器人私聊时，点输入框旁的菜单按钮即可一键发送指令。</p></div>
+    </section>
+
+    <!-- ============ ③ 代理 ============ -->
+    <section id="proxy">
+      <h2>③ 代理设置</h2>
+      <p>调用境外模型（如 Gemini / OpenAI）或网络受限时，需要配置代理。本机运行的代理直接填 <code>127.0.0.1</code> 地址即可。</p>
+      <h3>配置入口（二选一）</h3>
+      <ul>
+        <li><strong>管理后台（推荐，即时生效）</strong>：「🧠 AI 模型配置」页 → 顶部「全局代理地址」，填入如 <code>http://127.0.0.1:1080</code>，保存即热生效，无需重启。</li>
+        <li><strong>配置文件</strong>：<code>config.json</code> 的 <code>ai.proxy_url</code> 字段，改完需重启服务。</li>
+      </ul>
+      <h3>常见问题</h3>
+      <ul>
+        <li>代理软件默认端口各不同（1080 / 7890 / 10809…），以你本机代理软件的「允许局域网连接 / 混合端口」设置为准。</li>
+        <li>DeepSeek、通义 Qwen 为国内服务，<strong>直连即可，不必走代理</strong>；Gemini 必须走代理。</li>
+        <li>AI 配置页里每个 provider 有「走代理」勾选：勾选 = 该模型经全局代理访问；不勾 = 直连。</li>
+      </ul>
+    </section>
+
+    <!-- ============ ④ 平台注册 ============ -->
+    <section id="api-keys">
+      <h2>④ 模型 API 平台注册地址</h2>
+      <table>
+        <tr><th>平台</th><th>注册 / 控制台</th><th>说明</th></tr>
+        <tr>
+          <td><strong>DeepSeek</strong>（主力推荐）</td>
+          <td><a class="ext" href="https://platform.deepseek.com/" target="_blank">platform.deepseek.com</a></td>
+          <td>注册 → 充值 →「API keys」创建密钥（sk- 开头）。价格低、中文好，国内直连</td>
+        </tr>
+        <tr>
+          <td><strong>通义千问 Qwen</strong>（备用 + 向量）</td>
+          <td><a class="ext" href="https://bailian.console.aliyun.com/" target="_blank">阿里云百炼控制台</a></td>
+          <td>开通百炼 →「API-KEY 管理」创建（sk- 开头）。RAG 知识库的 embedding 也走它，国内直连</td>
+        </tr>
+        <tr>
+          <td><strong>Gemini</strong>（视觉/多模态）</td>
+          <td><a class="ext" href="https://aistudio.google.com/" target="_blank">Google AI Studio</a></td>
+          <td>「Get API key」创建（AIza 开头）。<strong>必须配置代理</strong>才能在国内访问</td>
+        </tr>
+      </table>
+      <div class="warn-box">⚠️ 至少配置一个 Key 系统才有 AI 分析能力。三个都配上最稳：调用失败 / 无额度时会按降级链自动轮转到下一个已配置模型。密钥在本机经 Windows DPAPI 加密存储，不会明文落盘。</div>
+    </section>
+
+    <!-- ============ ⑤ 模型配置 ============ -->
+    <section id="model-cfg">
+      <h2>⑤ 模型配置简要说明</h2>
+      <h3>配置页结构（管理后台「🧠 AI 模型配置」）</h3>
+      <ul>
+        <li><strong>启用开关 + API Key</strong>：填入对应平台的密钥即启用该模型。</li>
+        <li><strong>模型选择</strong>：每个 provider 下拉里选具体型号（如 deepseek-chat / qwen-vl-max / gemini-2.0-flash）。视觉类任务建议选带视觉能力的型号。</li>
+        <li><strong>走代理</strong>：境外模型勾选（配合全局代理地址）。</li>
+        <li><strong>任务路由规则</strong>：指定不同类型任务用哪个模型（文本分析 / 图像识别 / embedding 等），不懂就保持默认。</li>
+      </ul>
+      <h3>生效方式</h3>
+      <ul>
+        <li>API Key、模型选择、代理地址：<strong>保存后即时热生效</strong>，自动同步到 AI 路由，无需重启。</li>
+        <li>端口、AI 并发数等基础设置：修改 <code>config.json</code> 后<strong>需重启服务</strong>生效。</li>
+      </ul>
+      <h3>省钱建议</h3>
+      <ul>
+        <li>日常分析用 DeepSeek 足够便宜；Gemini 只留给需要看图的任务。</li>
+        <li>监控任务反复扫到的商品有去重（同一任务内不会重复分析），但<strong>不同任务各自计费</strong>，别用多个任务盯同一个关键词。</li>
+      </ul>
+    </section>
+
+    <!-- ============ ⑥ 闲鱼登录 ============ -->
+    <section id="xianyu">
+      <h2>⑥ 闲鱼登录方式说明</h2>
+      <p>搜索与监控都依赖闲鱼登录态（未登录会撞登录墙、抓 0 条）。</p>
+      <div class="step"><div class="n">1</div><p>打开管理后台「🐟 闲鱼登录」标签页。</p></div>
+      <div class="step"><div class="n">2</div><p>点击「获取二维码」，用手机<strong>闲鱼 App</strong> 扫码并确认登录。</p></div>
+      <div class="step"><div class="n">3</div><p>页面显示「已登录」即完成。登录态保存在本机数据目录（<code>data/spider-state/</code>），重启不丢。</p></div>
+      <h3>注意事项</h3>
+      <ul>
+        <li>登录态有有效期（闲鱼风控策略决定，通常数天到数周）。过期后搜索会明确提示「登录态已过期」，回来重新扫码即可。</li>
+        <li>频繁采集容易触发风控验证（滑块）。触发后系统会如实提示，暂停一阵再试，别连续猛扫。</li>
+        <li>同一时刻只允许 2 个扫码会话（防资源泄漏），失败会话会自动回收。</li>
+      </ul>
+    </section>
+
+    <!-- ============ ⑦ 帮助 ============ -->
+    <section id="help">
+      <h2>⑦ 指令帮助（飞书机器人）</h2>
+      <h3>搜索类</h3>
+      <table>
+        <tr><th>指令示例</th><th>作用</th></tr>
+        <tr><td><span class="cmd">找 Mac mini M4</span></td><td>一次性搜索 + AI 分析 + 高分推送（约 10 分钟）</td></tr>
+        <tr><td><span class="cmd">找 Switch 低于1200 个人卖家</span></td><td>带价格上限 / 卖家类型条件</td></tr>
+        <tr><td><span class="cmd">找 显卡 不要矿卡</span></td><td>排除关键词（AI 自动扩展同义词）</td></tr>
+        <tr><td><span class="cmd">停止搜索</span></td><td>中止正在进行的一次性搜索</td></tr>
+        <tr><td><span class="cmd">分析第2个</span></td><td>查看上次搜索结果中第 N 件的详细分析</td></tr>
+      </table>
+      <h3>监控类</h3>
+      <table>
+        <tr><th>指令示例</th><th>作用</th></tr>
+        <tr><td><span class="cmd">监控 RTX4090 低于8000</span></td><td>创建持久监控（默认每 30 分钟扫一轮，重启不丢）</td></tr>
+        <tr><td><span class="cmd">监控 桨板 低于300 个人卖家 禁止搜出租、租赁</span></td><td>组合条件 + 排除词</td></tr>
+        <tr><td><span class="cmd">任务列表</span></td><td>查看全部监控任务</td></tr>
+        <tr><td><span class="cmd">停止 桨板</span></td><td>停止指定监控（可发任务名/关键词）</td></tr>
+        <tr><td><span class="cmd">删除 桨板</span></td><td>删除监控任务（含去重记录）</td></tr>
+        <tr><td><span class="cmd">设置 桨板 间隔60分钟</span></td><td>修改监控间隔</td></tr>
+        <tr><td><span class="cmd">设置 桨板 阈值70</span></td><td>修改推送分数线</td></tr>
+      </table>
+      <h3>其他</h3>
+      <table>
+        <tr><th>指令</th><th>作用</th></tr>
+        <tr><td><span class="cmd">状态</span></td><td>运行时长 / 任务数 / 机器人状态</td></tr>
+        <tr><td><span class="cmd">登录闲鱼</span></td><td>获取闲鱼扫码登录指引</td></tr>
+        <tr><td><span class="cmd">拉黑 卖家名</span></td><td>拉黑卖家（搜索结果不再出现）</td></tr>
+        <tr><td><span class="cmd">帮助</span> / <span class="cmd">帮助 监控</span></td><td>总帮助 / 专题帮助</td></tr>
+      </table>
+      <div class="tip">💡 搜索是<strong>一次性指令</strong>，监控是<strong>持久任务</strong>。同名搜索与监控互不干扰；同一商品在同一监控任务内不会重复推送，但不同任务会各自分析（各自产生 AI 费用）。</div>
+    </section>
+
+    <footer>
+      闲鱼圣手 GoofishMasterDesktop · 仅供个人学习研究 · 数据全部保存在你自己的电脑上
+    </footer>
+  </main>
+</div>
+
+</body>
+</html>

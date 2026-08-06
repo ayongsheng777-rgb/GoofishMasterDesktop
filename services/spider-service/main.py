@@ -371,7 +371,38 @@ async def search_sync(request: SearchRequest):
     """Trigger a synchronous Xianyu search (waits for results)."""
     if not request.keyword.strip():
         raise HTTPException(status_code=400, detail="关键词不能为空")
-    return await run_spider_search(request)
+    # 任务句柄登记：/api/search/stop 据此取消（CancelledError 沿
+    # wait_for → scrape_xianyu 传播，采集循环已对该异常做优雅退出）。
+    task = asyncio.create_task(run_spider_search(request))
+    _state["current_search_task"] = task
+    try:
+        return await task
+    except asyncio.CancelledError:
+        logger.info("搜索已被手动停止: keyword=%s", request.keyword)
+        return {
+            "task_id": f"search_stopped_{request.keyword}",
+            "status": "stopped",
+            "keyword": request.keyword,
+            "results_count": 0,
+            "results": [],
+        }
+    finally:
+        _state["current_search_task"] = None
+
+
+@app.post("/api/search/stop")
+async def search_stop():
+    """手动停止当前进行中的同步搜索（pipeline「停止搜索」链路调用）。
+
+    协作式取消：cancel 任务句柄，采集循环在下一个 await 点收到
+    CancelledError 后优雅退出（浏览器上下文由 scraper 的 finally 回收）。
+    """
+    task = _state.get("current_search_task")
+    if task is None or task.done():
+        return {"success": False, "message": "当前没有进行中的搜索"}
+    task.cancel()
+    logger.info("收到停止搜索指令，已取消当前采集任务")
+    return {"success": True, "message": "停止指令已发送"}
 
 
 @app.post("/api/task/create")

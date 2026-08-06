@@ -563,6 +563,18 @@ async def handle_message(payload: dict) -> Optional[str]:
     if action == "stop_task":
         return await _stop_monitor_task(cmd.get("target", ""))
 
+    if action == "stop_search":
+        # 停止进行中的一次性搜索（采集阶段由 pipeline 联动 spider 中断）
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(f"{PIPELINE_URL}/api/search/stop")
+                data = resp.json()
+        except Exception as e:
+            return f"❌ 停止搜索失败: {e}"
+        if data.get("success"):
+            return f"🛑 {data.get('message', '已发送停止指令')}"
+        return f"ℹ️ {data.get('message', '当前没有进行中的搜索任务')}"
+
     if action == "delete_task":
         return await _delete_monitor_task(cmd.get("target", ""))
 
@@ -818,15 +830,57 @@ async def send_notification(body: NotifyBody):
 
 @app.post("/api/reconfigure")
 async def reconfigure():
+    """彻底清空飞书配置（无残留），回到未配置初始态。
+
+    清理面（曾只删 credentials.json，残留三处）：
+    1. 运行中的 bot：断开 WS 长连接（否则旧连接仍在线收消息）；
+    2. 进行中的扫码轮询任务（否则扫码成功回调会把旧凭证又写回来）；
+    3. config.json 的 feishu.*（扫码成功时会回写；不清则重启后
+       launcher 重新注入 env、控制台配置概览仍显示「已配置」）。
+    """
+    # 1. 停 bot（断长连接）
+    bot = _state.get("bot")
+    if bot is not None:
+        try:
+            bot.stop()
+        except Exception as e:
+            logger.warning("停止机器人异常（忽略）: %s", e)
+    _state["bot"] = None
+    _state["bot_running"] = False
+    _state["bot_error"] = ""
+    _state["bot_thread"] = None
+
+    # 2. 取消进行中的扫码轮询，防旧凭证回写
+    for _tok, _t in list(_state.get("poll_tasks", {}).items()):
+        try:
+            _t.cancel()
+        except Exception:
+            pass
+    _state.get("poll_tasks", {}).clear()
+
+    # 3. 删凭证文件
     if CRED_FILE.exists():
         CRED_FILE.unlink()
     open_id_file = DATA_DIR / "configured_open_id.json"
     if open_id_file.exists():
         open_id_file.unlink()
-    _state["bot"] = None
-    _state["bot_running"] = False
-    _state["bot_error"] = ""
-    return {"ok": True, "message": "已清除凭证，请重新扫码配置"}
+
+    # 4. 清 config.json 的 feishu.*
+    if cfg_mod is not None:
+        try:
+            base = cfg_mod.load_config()
+            feishu = base.setdefault("feishu", {})
+            feishu["app_id"] = ""
+            feishu["app_secret"] = ""
+            cfg_mod.save_config(base)
+        except Exception as e:
+            logger.warning("清理 config.json 飞书配置失败: %s", e)
+
+    # 5. 清当前进程 env（readiness 立即如实显示未配置）
+    os.environ.pop("FEISHU_APP_ID", None)
+    os.environ.pop("FEISHU_APP_SECRET", None)
+
+    return {"ok": True, "message": "已清除全部飞书配置，请重新扫码配置"}
 
 
 @app.get("/api/health")
