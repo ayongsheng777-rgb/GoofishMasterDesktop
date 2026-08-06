@@ -382,6 +382,12 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **已安装实例热更新**：上述数据文件已 cp 进 `D:\GoofishMasterDesktop\_internal\`（16 个文件），重启桌面应用即生效；**launcher 层改动（Job Object 接入、看门狗熔断）冻结在 exe 内，需重打包才对安装实例生效**。
 - **Docker 版 PG 里残留「桨板监控」任务**：栈重启后会继续跑但无飞书凭证推送不出去，如需清理进容器删任务。
 
+**同日第四批（使用说明文档完善，v1.1.1）**：
+- **《使用说明》内容补全**（`desktop/ui/help.html`）：④ 模型平台注册从 3 个扩到 6 个（新增 OpenAI、智谱 AI/GLM、Moonshot/Kimi，标注国内直连 vs 境外需代理）；⑥ 闲鱼登录新增「方式二：飞书指令登录」（飞书绑定时直接发「闲鱼登录」指令，二维码推送至飞书对话扫码）；② 飞书绑定新增「App 内一键新建/选择机器人绑定启用」免填 Secret 的方式；⑦ 指令帮助全面重排——基本/条件筛选/搜索示例/监控示例/管理指令（任务列表、停止、删除、设置间隔/阈值、拉黑、闲鱼登录、状态）/专题帮助（帮助 搜索/监控/分析/风险/卖家/价格/设置）。
+- **捐赠板块精简**：移除「赞助将用于」用途说明与金额档位（¥6.6/¥16.6/¥66），保留二维码与一句随缘打赏说明；RELEASE_BODY/RELEASE_NOTES 校验信息更新至 v1.1.1（SHA-256 `329e8d1ee38f48abdd54abc7c97ec0769ddd7ad2bb4124de8a7b1f133e31c39d`，608,428,947 字节）。
+- **捐赠二维码随文档打包**：`微信收款.png`/`支付宝收款.jpg` 拷入 `desktop/ui/` 并 git 跟踪（wechat-pay.png / alipay-pay.jpg），随构建进 `_internal`；RELEASE_BODY 另引用 release 资产 donate-wechat.png / donate-alipay.jpg（来自 assets/）。
+- **已发布 v1.1.1**：commit `f38d8a9` 已 push main；GitHub Release v1.1.1 已建，`gh release create` 建壳 + curl 直传（代理，避免 gh 上传 500MB+ 报 400）上传安装包与两张捐赠图。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。
