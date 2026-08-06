@@ -65,4 +65,4 @@
 
 完整发行说明见仓库 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-**校验信息**：版本 `v1.1.2`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.1.2.exe` · 约 580 MB（580,497,499 字节）· SHA-256 `da0080a2a945942a0bce7986d04fa034734ea9fc404fd946dcc0939f78d38f29` · Windows 10/11 x64 · 许可 MIT
+**校验信息**：版本 `v1.1.2`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.1.2.exe` · 约 580 MB（583,982,382 字节）· SHA-256 `d49ae218697172b7ee46ad265c7f67fa09c1e2ffa4e33fb37c09e2a47dd46b62` · Windows 10/11 x64 · 许可 MIT
