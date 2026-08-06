@@ -397,6 +397,16 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 3. **目录清理**：删 `_build_v112/`（v1.1.2 PyInstaller 中间目录，产物已入 release/ 与 installer/）；`.gitignore` 补 `_build*/` 防再次入库。
 4. **对比 GitHub 发现**：① 仓库实际是 **Public**（memory 旧记录 Private 已过时）；② **v1.1.2 tag 在、Release 从未创建**——README 下载链接 404，需补建 Release 并传安装包（curl+代理直传，同 v1.1.1 法）。
 
+## 8.10 2026-08-06 傍晚 v1.1.3 紧急修复版（引导损坏 + 安装实例修复）
+
+**事故链**：为补 v1.1.2 Release 重建安装包时，`release/` 已是**弗兰肯斯坦构建**——exe 来自 14:52 构建（36.4MB 的是旧 exe，新 exe 6.1MB）、`base_library.zip` 来自 15:13 另一次构建（疑系统 Python 3.12 而非 venv 3.13，marshal 版本不匹配）→ 打出的包装上一启动即 `Failed to start embedded python interpreter!`（实为 `Failed to import encodings module`，zipimport 反序列化失败）。**教训：① exe 与 _internal 必须同一次构建产出，混用即崩；② 打包前必须实跑 `release/.../exe preflight` 做引导冒烟（本次已固化为流程）；③ preflight 会在 exe 同级生成 config/，ISCC 前必须删掉（AGENTS §8 已有"无内嵌 config"要求）；④ 沙箱内 PowerShell 写工作区外路径（D:\GoofishMasterDesktop）静默失败，需显式提权；⑤ 安装验证目录决不能放仓库工作树内（`git add -A` 会卷入，本次 _install_test 被误提交 1,768 文件，靠 reset --mixed 未推送前救回，已 gitignore）。**
+
+**处置**：
+1. venv 3.13 全新 PyInstaller 构建（含 §8.9 全部修复）→ dist exe preflight 通过（36.4MB，与历史正常 exe 量级一致；6.1MB 即坏包特征）→ 清 config/data 残留 → 置换 release/ → 再验证 → ISCC 出 v1.1.3（608,449,715 字节，SHA-256 `6d2e870f...acba5f6`）。
+2. **安装包端到端验证**：`/VERYSILENT /DIR=临时目录` 静默安装 → 安装后 exe preflight `all_ok=true`（WebView2 随包 + Chromium 随包识别正常）。
+3. **D:\GoofishMasterDesktop 安装实例修复**：robocopy /MIR 同步新 _internal + 新 exe（保留 config/data/playwright-browsers/webview2_runtime/unins）→ preflight + 4 服务全健康（8911-8914 alive）验证后关停。
+4. 版本号双处同步（.iss MyAppVersion + config.py APP_VERSION=1.1.3）；commit `c22af16` + tag v1.1.3 已推送；Release v1.1.3 已建（id 366099024，安装包 curl 直传 + donate 双图）。v1.1.2 Release 已被删除（无需再标撤回）。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。
