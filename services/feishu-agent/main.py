@@ -41,6 +41,15 @@ except Exception:
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+# 日志脱敏（详见 common/logfilter.py）。飞书回调体里带 app_secret / 验证 token。
+# 此处 sys.path 已在上方 try 块插入根目录。
+try:
+    from common.logfilter import install as _install_logfilter
+    _install_logfilter()
+except Exception:
+    pass
+
 logger = logging.getLogger("feishu-agent")
 
 # 兜底目录必须落在项目内（Docker 遗留的 "/app/data" 在 Windows 会写到盘符根）。
@@ -77,7 +86,10 @@ if _static_dir.exists():
 # Previously every admin endpoint was wide open on the public port.
 # 精确匹配公开端点：/api/auth/* 是认证流本身，/api/health 是探活。
 # 用精确集合避免 /api/healthz、/api/health-debug 等意外公开（2026-08-03 加固）
-_PUBLIC_API_EXACT = frozenset({"/api/health"})
+# /api/health/live 与 /api/health/ready 同属探活链路（桌面控制台与看门狗无
+# session 亦需读取）。ready 只回报「已配置 / 未配置」，不回显任何凭证内容；
+# 服务仅绑定 127.0.0.1，故公开可接受。
+_PUBLIC_API_EXACT = frozenset({"/api/health", "/api/health/live", "/api/health/ready"})
 _INTERNAL_TOKEN = os.environ.get("GOOFISH_SECRET_KEY", "").strip()
 
 
@@ -820,6 +832,67 @@ async def reconfigure():
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "feishu-agent", "version": "2.0.0"}
+
+
+# ---- 三级健康模型：liveness / readiness（详见 common/health.py） ----
+def _load_health_mod():
+    try:
+        _root = str(Path(__file__).resolve().parents[2])
+        if _root not in sys.path:
+            sys.path.insert(0, _root)
+        from common import health as _h
+        return _h
+    except Exception:
+        return None
+
+
+@app.get("/api/health/live")
+async def health_live():
+    """存活探针：进程在跑即 200，不触碰任何依赖（供看门狗使用）。"""
+    return {"status": "alive", "service": "feishu-agent"}
+
+
+@app.get("/api/health/ready")
+async def health_ready():
+    """就绪探针：探测飞书凭证、机器人连接、下游服务可达性。
+
+    只回报「是否已配置」，绝不回显任何凭证内容。
+    """
+    _h = _load_health_mod()
+    if _h is None:
+        return {"service": "feishu-agent", "status": "unknown",
+                "reasons": ["common.health 不可用"]}
+
+    def _chk_feishu_cred():
+        app_id = os.environ.get("FEISHU_APP_ID", "")
+        secret = os.environ.get("FEISHU_APP_SECRET", "")
+        if app_id and secret:
+            return True, "已配置"
+        return False, "飞书 App 未配置，机器人不可用"
+
+    def _chk_bot():
+        err = _state.get("bot_error") or ""
+        if err:
+            return False, str(err)[:120]
+        return True, "长连接正常"
+
+    async def _chk_downstream(url: str, label: str):
+        if not url:
+            return False, f"{label} 地址未配置"
+        async with httpx.AsyncClient(timeout=2.0) as c:
+            r = await c.get(f"{url}/api/health")
+            return r.status_code == 200, f"{label} HTTP {r.status_code}"
+
+    specs = [
+        ("ai_router", lambda: _chk_downstream(AI_ROUTER_URL, "ai-router"), True),
+        ("agent_pipeline", lambda: _chk_downstream(PIPELINE_URL, "agent-pipeline"), True),
+        ("spider", lambda: _chk_downstream(SPIDER_URL, "spider"), False),
+        ("feishu_credential", _chk_feishu_cred, False),
+        ("feishu_bot", _chk_bot, False),
+    ]
+    report = await _h.gather_report("feishu-agent", specs, version="2.0.0")
+    return JSONResponse(status_code=200 if report["ready"] else 503,
+                        content=report)
 
 
 # ============ Auth Endpoints ============

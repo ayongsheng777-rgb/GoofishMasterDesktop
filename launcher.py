@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -36,16 +37,65 @@ logging.basicConfig(
     format="%(asctime)s [launcher] %(levelname)s %(message)s",
     datefmt="%H:%M:%S",
 )
+
+# 日志脱敏：launcher 会打印子进程的启动环境摘要，里面带 AI Key。
+try:
+    from common.logfilter import install as _install_logfilter  # noqa: E402
+    _install_logfilter()
+except Exception:
+    pass
+
 log = logging.getLogger("launcher")
 
 CFG = cfg_mod.load_config()
 
-SERVICES = [
-    {"name": "ai-router",      "port_key": "ai_router",      "dir": "services/ai-router"},
-    {"name": "feishu-agent",   "port_key": "feishu_agent",   "dir": "services/feishu-agent"},
-    {"name": "agent-pipeline", "port_key": "agent_pipeline", "dir": "services/agent-pipeline"},
-    {"name": "spider-service", "port_key": "spider",         "dir": "services/spider-service"},
+# 服务定义 + 依赖声明。
+# `depends` 表示「该服务运行期会调用谁」，启动顺序由拓扑排序求出，
+# 保证被调用方先就绪。此前是硬编码列表且 feishu-agent 排在 agent-pipeline
+# 之前，而 feishu-agent 启动后即可能转发指令给 pipeline（:8913 尚未监听）
+# → connection refused。改为声明依赖后顺序由代码保证，新增服务不易排错。
+_SERVICE_DEFS = [
+    {"name": "ai-router",      "port_key": "ai_router",      "dir": "services/ai-router",
+     "depends": []},
+    {"name": "agent-pipeline", "port_key": "agent_pipeline", "dir": "services/agent-pipeline",
+     "depends": ["ai-router"]},
+    {"name": "spider-service", "port_key": "spider",         "dir": "services/spider-service",
+     "depends": ["ai-router", "agent-pipeline"]},
+    {"name": "feishu-agent",   "port_key": "feishu_agent",   "dir": "services/feishu-agent",
+     "depends": ["ai-router", "agent-pipeline", "spider-service"]},
 ]
+
+
+def _topo_sort(defs: list[dict]) -> list[dict]:
+    """按 depends 拓扑排序（Kahn）。存在环时退回声明顺序并告警，绝不死锁。"""
+    by_name = {d["name"]: d for d in defs}
+    indeg = {d["name"]: 0 for d in defs}
+    children: dict[str, list[str]] = {d["name"]: [] for d in defs}
+    for d in defs:
+        for dep in d.get("depends", []):
+            if dep not in by_name:
+                log.warning("服务 %s 声明了未知依赖 %s，已忽略", d["name"], dep)
+                continue
+            indeg[d["name"]] += 1
+            children[dep].append(d["name"])
+    # 用声明顺序作为同层内的稳定次序（结果可复现）
+    order: list[dict] = []
+    ready = [d["name"] for d in defs if indeg[d["name"]] == 0]
+    while ready:
+        cur = ready.pop(0)
+        order.append(by_name[cur])
+        for nxt in children[cur]:
+            indeg[nxt] -= 1
+            if indeg[nxt] == 0:
+                ready.append(nxt)
+    if len(order) != len(defs):
+        missing = [d["name"] for d in defs if d not in order]
+        log.error("服务依赖存在循环（%s），回退到声明顺序启动", ", ".join(missing))
+        return list(defs)
+    return order
+
+
+SERVICES = _topo_sort(_SERVICE_DEFS)
 
 PROCS: dict[str, subprocess.Popen] = {}
 _RUNNING = True
@@ -134,19 +184,64 @@ def _data_dir(sub: str) -> str:
     return str(d)
 
 
+# 单个环境变量的安全上限（Windows 硬上限 32767，留出余量）
+_ENV_VALUE_LIMIT = 32000
+
+# 这些变量是「以 os.pathsep 分隔的路径列表」，超长时必须按整条目裁剪。
+# 从中间硬切会产生半截路径（如 PATH 末尾变成 "C:\Program Files\Pyt"），
+# 子进程据此找不到 python / playwright / chrome，且报错完全不指向真因。
+_PATH_LIKE_VARS = {"PATH", "PYTHONPATH", "PSMODULEPATH", "LIB", "INCLUDE",
+                   "CLASSPATH", "LD_LIBRARY_PATH"}
+
+
+def _truncate_path_like(name: str, value: str) -> str:
+    """按 os.pathsep 逐条保留，丢弃放不下的**完整**条目（不切碎任何一条）。"""
+    parts = [p for p in value.split(os.pathsep) if p]
+    kept: list[str] = []
+    total = 0
+    dropped = 0
+    for p in parts:
+        add = len(p) + (1 if kept else 0)
+        if total + add > _ENV_VALUE_LIMIT:
+            dropped += 1
+            continue
+        kept.append(p)
+        total += add
+    if dropped:
+        log.warning("环境变量 %s 超长，已丢弃末尾 %d 个完整路径条目（保留 %d 条，"
+                    "未产生半截路径）", name, dropped, len(kept))
+    return os.pathsep.join(kept)
+
+
 def _safe_env() -> dict:
-    """复制当前环境变量，将单个值截断到 32000 字符以内。
+    """复制当前环境变量，保证单个值不超过 Windows 上限。
 
     避免 Windows 单环境变量 32767 上限：当前会话 PATH 等被撑大时，
     直接 `dict(os.environ)` 透传给子进程会抛
     'environment variable is longer than 32767 characters' 导致子进程启动即崩。
+
+    关键：**路径列表型变量按条目裁剪，绝不从中间截断**（见 _PATH_LIKE_VARS）。
     """
     env: dict = {}
     for k, v in os.environ.items():
-        if len(v) > 32000:
-            v = v[:32000]
+        if len(v) > _ENV_VALUE_LIMIT:
+            if k.upper() in _PATH_LIKE_VARS:
+                v = _truncate_path_like(k, v)
+            else:
+                log.warning("环境变量 %s 超长（%d 字符），已截断至 %d",
+                            k, len(v), _ENV_VALUE_LIMIT)
+                v = v[:_ENV_VALUE_LIMIT]
         env[k] = v
     return env
+
+
+# 服务名 → data 子目录（与 _data_dir 注入保持一致）
+_DATA_SUB = {
+    "feishu-agent": "feishu-agent",
+    "ai-router": "ai-router",
+    "agent-pipeline": "agent-pipeline",
+    "spider-service": "spider",
+}
 
 
 def build_env(name: str) -> dict:
@@ -156,10 +251,19 @@ def build_env(name: str) -> dict:
     e["GOOFISH_SECRET_KEY"] = CFG.get("secret_key", "")
     # 指向打包随附的 Chromium（安装时落盘到 app 同级 playwright-browsers）
     e["PLAYWRIGHT_BROWSERS_PATH"] = str(_bundled_browsers_dir())
+
+    # 存储引擎：桌面版恒为 sqlite（进程内 aiosqlite），显式声明避免歧义。
+    # SQLITE_DISABLED 是各服务 db.py 唯一认可的降级开关，与 POSTGRES_ENABLED 解耦。
+    engine = cfg_mod.storage_engine(CFG)
+    e["STORAGE_ENGINE"] = engine
+    e["SQLITE_DISABLED"] = "false"
+
     # 本地后端连接串：仅在对应后端 enabled 时注入真实地址；
     # 未启用则注入空串 + 显式 *_ENABLED=false，让各服务跳过连接尝试、
     # 干净降级（不再向死地址重试/告警），overview 也据此判 degraded。
-    bu = cfg_mod.backend_urls(CFG)
+    # DATABASE_URL 现在如实反映 sqlite 落盘位置（不再伪造 postgresql:// 串）。
+    _sub = _DATA_SUB.get(name)
+    bu = cfg_mod.backend_urls(CFG, _data_dir(_sub) if _sub else None)
     be = CFG.get("backends", {}) or {}
     def _on(name: str, url: str) -> None:
         if (be.get(name) or {}).get("enabled", False):
@@ -171,6 +275,11 @@ def build_env(name: str) -> dict:
     _on("redis", bu["REDIS_URL"])
     _on("postgres", bu["DATABASE_URL"])
     _on("qdrant", bu["QDRANT_URL"])
+    # 注意：上面的 _on 注入的是 <NAME>_URL（即 POSTGRES_URL），历史上文档写作
+    # "注入 DATABASE_URL" 但实际从未注入过——各服务的 db.py 也从不读它，
+    # 而是由 DATA_DIR 推导 SQLite 路径。这里补一个语义正确的 DATABASE_URL，
+    # 让「配置声明」与「实际存储」对得上，排障时不再被 postgresql:// 误导。
+    e["DATABASE_URL"] = bu["DATABASE_URL"]
 
     urls = cfg_mod.service_urls(CFG)
     p = CFG["ports"]
@@ -221,12 +330,60 @@ def build_env(name: str) -> dict:
 
 
 def health_ok(port: int) -> bool:
+    """liveness：进程是否在监听并响应。看门狗据此决定要不要重启。
+
+    刻意保持只看 HTTP 200——依赖（DB/AI Key/Chromium）的问题应由 readiness
+    暴露，绝不能触发重启，否则依赖抖动会引发无意义的重启风暴。
+    """
     url = f"http://127.0.0.1:{port}/api/health"
     try:
         with urllib.request.urlopen(url, timeout=2) as r:
             return r.status == 200
     except Exception:
         return False
+
+
+def readiness(port: int, timeout: float = 5.0) -> dict:
+    """readiness：拉取单个服务的依赖体检报告（/api/health/ready）。
+
+    老版本服务没有该端点（404）时退回 liveness 结果，标记 status=unknown，
+    保证新 launcher 配旧服务不会误报故障。
+    """
+    url = f"http://127.0.0.1:{port}/api/health/ready"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        # 503 = degraded/error，响应体里仍是完整报告
+        try:
+            return json.loads(e.read().decode("utf-8"))
+        except Exception:
+            return {"status": "error", "ready": False,
+                    "reasons": [f"HTTP {e.code}"]}
+    except Exception as e:
+        alive = health_ok(port)
+        return {"status": "unknown" if alive else "error",
+                "ready": alive,
+                "reasons": [] if alive else [f"不可达: {e}"]}
+
+
+def readiness_all() -> dict:
+    """聚合 4 个服务的就绪报告，给出整体状态（供桌面控制台展示）。"""
+    services: dict = {}
+    worst = "healthy"
+    rank = {"healthy": 0, "unknown": 1, "degraded": 2, "error": 3}
+    for svc in SERVICES:
+        port = CFG["ports"][svc["port_key"]]
+        rep = readiness(port)
+        services[svc["name"]] = rep
+        st = rep.get("status", "unknown")
+        if rank.get(st, 1) > rank.get(worst, 0):
+            worst = st
+    reasons = []
+    for nm, rep in services.items():
+        for r in rep.get("reasons", []) or []:
+            reasons.append(f"{nm} / {r}")
+    return {"status": worst, "services": services, "reasons": reasons}
 
 
 def start_service(svc: dict) -> subprocess.Popen:

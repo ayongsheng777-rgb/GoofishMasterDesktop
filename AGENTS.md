@@ -317,6 +317,35 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 ---
 
+## 8.7 2026-08-06 安全加固 + Playwright 进程回收 + 测试套件（v1.0.0 稳定性收尾）
+
+按代码级审查报告执行稳定性收尾（目标：发布 v1.0）。全部 7 项任务代码落地，新增 `tests/` 单元测试 66 项全绿 + 变异测试验证有效。
+
+| # | 位置 | 问题（审查报告） | 修法 |
+|---|------|------|------|
+| 安全-P0 | `common/secretstore.py` | AI Key / 飞书 AppSecret 明文存 `config.json`，任何能读文件的人直接拿密钥 | 新增 **Windows DPAPI** 加密封装（`CryptProtectData`/`CryptUnprotectData`，当前用户作用域）：`save_secret`/`load_secret` 自动加密落盘；新增 `available()` 真实往返探测（DPAPI 不可用时降级明文并告警，不崩）；密钥迁移只跑一次 |
+| 安全-P0 | `config/` + `.gitignore` | 密钥加密迁移生成的 `config/config.json.plain.bak`（**明文**密钥备份）只被 `config/config.json` 单条忽略，会随提交泄露 | `.gitignore` 改为忽略整个 `config/` 目录（含明文备份）；新增 `.pytest_cache/` |
+| 安全-P1 | `common/logfilter.py` + 4 服务 | 日志里会刷出 AI Key / 飞书 AppSecret / 闲鱼 Cookie / token（明文），运维日志成泄密面 | 新建 `SensitiveFilter`（遮蔽 `sk-`/`cli_`/`AIza`/`xoxb`/`app_secret`/Bearer 等），`install()` 挂到 root + uvicorn 等晚装 handler 的 logger；**关键修复**：uvicorn 在 `uvicorn.run()` 后才装自身 handler 且 `propagate=False`，模块导入期挂的 filter 覆盖不到 → 加 `auto_patch` monkeypatch `Logger.addHandler`，后装 handler 也自动带 filter。launcher + 4 服务 `main.py` 在 `basicConfig` 后各挂一次 |
+| 性能-P1 | `services/spider-service/main.py` | Playwright Chromium + node driver 进程泄漏：扫码登录失败分支直接 return，浏览器既没关、会话也没进 `_login_sessions` → TTL 清扫器永远够不到 → 每次启动失败泄漏一个 Chromium + node 进程（内存泄漏） | `login_qrcode_start` 改为 `pw=browser=None; registered=False` 提到 try 外，finally 里 `if not registered: await _shutdown_browser(...)`；success/failed 两条路径都 `_close_login_session`；新增 `_shutdown_browser`（带 15s 超时，先 close browser 再 stop driver）、`_close_login_session`、`_purge_stale_login_sessions`、`_login_session_janitor`（60s 周期清扫，TTL 600s）、startup 启 janitor / shutdown 兜底回收全量；超 `_MAX_LOGIN_SESSIONS`(默认2) 返回 429；readiness 新增 `_chk_browser_pool()` 报「扫码浏览器 n/2」并满额标 degraded |
+| 性能-P1 | `services/spider-service/src/scraper.py` | 采集主循环只 `await browser.close()` 且不设超时，页面卡死时永久吊死 event loop | 主循环 finally 先 `context.close()` 再 `browser.close()`（各带 15s `wait_for`）；`scrape_user_profile` / 详情页的 `page.close()` 各自 try/except 包裹，防 `TargetClosedError` 掩盖真实异常 |
+
+**新增 `tests/`（单元测试，pytest 9.1.1 + pytest-asyncio 1.4.0）**：
+- `tests/conftest.py`：公共夹具（`tmp_cfg_path` / `clean_logging` / ROOT 注入 sys.path）
+- `tests/test_config.py`（11）：深合并补缺失嵌套键、`None`→缺失、deepcopy 不共享、`database_url` 返回 sqlite 串（不伪造 PG）、落盘加密、迁移只跑一次、save 不改调用方 dict
+- `tests/test_launcher.py`（15）：依赖拓扑排序（顺序/稳定/环回退/未知依赖忽略）、PATH 按条目裁剪（防超长 32767 卡死 os.environ）、`build_env` 注入、`POSTGRES_ENABLED=false` 时 `SQLITE_DISABLED` 仍为 false（BUG-6 回归）
+- `tests/test_logfilter.py`（19）：各类 key 前缀打码、JSON/裸赋值打码、正常日志不动、短值透传、`install` 后装 handler 覆盖、幂等、过滤器永不崩
+- `tests/test_health.py`（13）：healthy/degraded/error 判定、并发聚合 <0.5s、异常/超时转失败项
+- `tests/test_spider_browser_lifecycle.py`（8）：用 FakePlaywright 三件套验证启动失败释放、成功保留、并发上限 429、TTL 清扫、幂等关闭、关不掉超时、None 容忍、shutdown 钩子全回收
+- `tests/manual_launch_check.py`：**真实启动验证脚本**（隔离端口 8951-8954，避免与已安装桌面版 8911-8914 冲突），拉起 4 服务查 live/ready 端点 + 抽查日志脱敏；不随 `pytest` 自动跑
+
+**验证**：
+- 全量 `pytest` → **66 passed**（5 个测试文件）
+- **变异测试**：注入 4 处变异（spider 启动失败清理 / config 深合并退化 / launcher PATH 硬切 / logfilter 补丁关闭）→ 5 个测试变红，证明测试非自娱自乐；还原后 66 passed
+- `tests/manual_launch_check.py` → 4 服务全部 `/api/health/live` `alive` + `/api/health/ready` 正确 degraded/healthy；日志脱敏抽查「4 个日志文件未见明文凭据」✅
+- `py_compile` 全过
+
+**端口冲突警示（本次踩坑）**：本机已安装的 `D:\GoofishMasterDesktop\GoofishMasterDesktop.exe`（pid 18888 + 4 个 `--service` 子进程）常驻占用 8911-8914，**不可触碰**。任何本地验证必须改用隔离端口（如 895x）。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对。

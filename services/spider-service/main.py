@@ -15,6 +15,19 @@ from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+# 日志脱敏（详见 common/logfilter.py）。爬虫日志里会出现闲鱼 Cookie / token。
+try:
+    import sys as _sys
+    from pathlib import Path as _P
+    _r = str(_P(__file__).resolve().parents[2])
+    if _r not in _sys.path:
+        _sys.path.insert(0, _r)
+    from common.logfilter import install as _install_logfilter
+    _install_logfilter()
+except Exception:
+    pass
+
 logger = logging.getLogger("spider-service")
 
 app = FastAPI(title="GoofishMasterDesktop · Spider Service", version="2.0.0")
@@ -451,6 +464,83 @@ async def health():
     return {"status": "ok", "service": "spider-service", "version": "2.0.0"}
 
 
+# ---- 三级健康模型：liveness / readiness（详见 common/health.py） ----
+# 注：下面引用的 STATE_DIR / DEFAULT_STATE_FILE 定义在本段之后，但均在函数体内
+# 延迟求值，调用时模块已完成加载，不存在 NameError。
+def _load_health_mod():
+    try:
+        import sys as _sys
+        _root = str(Path(__file__).resolve().parents[2])
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        from common import health as _h
+        return _h
+    except Exception:
+        return None
+
+
+@app.get("/api/health/live")
+async def health_live():
+    """存活探针：进程在跑即 200，不触碰任何依赖（供看门狗使用）。"""
+    return {"status": "alive", "service": "spider-service"}
+
+
+@app.get("/api/health/ready")
+async def health_ready():
+    """就绪探针：探测 Playwright 驱动、Chromium、状态目录可写、闲鱼登录态。
+
+    这几项才是「采集到底能不能跑」的真实前提——只看进程活着毫无意义。
+    """
+    _h = _load_health_mod()
+    if _h is None:
+        return {"service": "spider-service", "status": "unknown",
+                "reasons": ["common.health 不可用"]}
+
+    def _chk_playwright():
+        import importlib
+        importlib.import_module("playwright.async_api")
+        return True, "驱动已就绪"
+
+    def _chk_chromium():
+        bdir = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "")
+        if bdir and Path(bdir).is_dir():
+            hits = [p.name for p in Path(bdir).iterdir()
+                    if p.is_dir() and p.name.startswith("chromium")]
+            if hits:
+                return True, "随包 Chromium: " + ",".join(sorted(hits)[:2])
+        return False, "未找到随包 Chromium，将回退系统 Chrome/Edge"
+
+    def _chk_state_dir():
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        probe = STATE_DIR / ".health_probe"
+        probe.write_text("1", encoding="utf-8")
+        probe.unlink()
+        return True, str(STATE_DIR)
+
+    def _chk_login():
+        exists = DEFAULT_STATE_FILE.exists()
+        return exists, ("已登录闲鱼" if exists
+                        else "尚未登录闲鱼，采集会撞登录墙")
+
+    def _chk_browser_pool():
+        """扫码浏览器占用。满额说明有会话没释放，是内存泄漏的早期信号。"""
+        n = len(_login_sessions)
+        ok = n < _MAX_LOGIN_SESSIONS
+        return ok, (f"扫码浏览器 {n}/{_MAX_LOGIN_SESSIONS}"
+                    + ("" if ok else "（已满额，新扫码请求会被拒绝）"))
+
+    specs = [
+        ("playwright", _chk_playwright, True),
+        ("state_dir_writable", _chk_state_dir, True),
+        ("chromium", _chk_chromium, False),
+        ("xianyu_login", _chk_login, False),
+        ("browser_pool", _chk_browser_pool, False),
+    ]
+    report = await _h.gather_report("spider-service", specs, version="2.0.0")
+    from fastapi.responses import JSONResponse as _JR
+    return _JR(status_code=200 if report["ready"] else 503, content=report)
+
+
 # ============ Xianyu Login Endpoints ============
 
 STATE_DIR = Path(os.environ.get("ACCOUNT_STATE_DIR")
@@ -488,6 +578,41 @@ def _read_login_health() -> Dict[str, Any]:
 _login_sessions: Dict[str, Dict[str, Any]] = {}
 _LOGIN_SESSION_TTL = 600  # 扫码会话 10 分钟过期，防止浏览器实例泄漏
 
+# 同时存活的扫码浏览器上限。每个 Chromium 常驻 150-300MB，桌面端跑在用户
+# 自己的机器上，不能像服务器那样敞开。超限直接拒绝，让用户先用完/等过期。
+_MAX_LOGIN_SESSIONS = int(os.environ.get("MAX_LOGIN_SESSIONS", "2"))
+
+# 关浏览器的超时。Windows 上 Chromium 偶发关不掉（页面卡在 JS 死循环时
+# CDP 不响应），不设超时会把整个 event loop 一起吊死。
+_BROWSER_CLOSE_TIMEOUT = 15
+
+
+async def _shutdown_browser(pw: Any, browser: Any, label: str = "") -> None:
+    """带超时地关闭 browser + 停止 playwright driver。
+
+    两段都必须做：只 close browser 而不 stop playwright，会残留 node.exe
+    驱动进程（Playwright 的进程模型是「Python ←stdio→ node driver ←→ chromium」）。
+    """
+    if browser is not None:
+        try:
+            await asyncio.wait_for(browser.close(), timeout=_BROWSER_CLOSE_TIMEOUT)
+        except Exception as e:
+            logger.warning("关闭浏览器失败%s: %s", f"({label})" if label else "", e)
+    if pw is not None:
+        try:
+            await asyncio.wait_for(pw.stop(), timeout=_BROWSER_CLOSE_TIMEOUT)
+        except Exception as e:
+            logger.warning("停止 playwright 驱动失败%s: %s", f"({label})" if label else "", e)
+
+
+async def _close_login_session(session_id: str) -> None:
+    """从表里摘掉会话并释放其浏览器资源（幂等）。"""
+    session = _login_sessions.pop(session_id, None)
+    if not session:
+        return
+    await _shutdown_browser(session.get("playwright"), session.get("browser"),
+                            label=session_id)
+
 
 async def _purge_stale_login_sessions() -> None:
     """Close and drop login sessions older than TTL (browser/process leak guard)."""
@@ -495,18 +620,37 @@ async def _purge_stale_login_sessions() -> None:
     stale = [sid for sid, s in _login_sessions.items()
              if now - s.get("created_at", now) > _LOGIN_SESSION_TTL]
     for sid in stale:
-        session = _login_sessions.pop(sid, None)
-        if not session:
-            continue
         logger.info("清理过期登录会话: %s", sid)
+        await _close_login_session(sid)
+
+
+async def _login_session_janitor() -> None:
+    """周期性清扫过期扫码会话。
+
+    原先只在 `/api/login/qrcode/start` 入口顺带清理一次——用户点开二维码后
+    直接关掉页面再也不回来，那个 Chromium 就一直挂着，直到下次有人再点扫码。
+    改为常驻清扫，60s 一轮。
+    """
+    while True:
         try:
-            await session["browser"].close()
-        except Exception:
-            pass
-        try:
-            await session["playwright"].stop()
-        except Exception:
-            pass
+            await asyncio.sleep(60)
+            await _purge_stale_login_sessions()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.warning("登录会话清扫异常: %s", e)
+
+
+@app.on_event("startup")
+async def _start_janitor() -> None:
+    _spawn_bg(_login_session_janitor())
+
+
+@app.on_event("shutdown")
+async def _shutdown_login_sessions() -> None:
+    """进程退出时兜底回收，避免留下孤儿 chrome.exe / node.exe。"""
+    for sid in list(_login_sessions.keys()):
+        await _close_login_session(sid)
 
 
 
@@ -639,6 +783,19 @@ async def login_qrcode_start():
     await _purge_stale_login_sessions()
     session_id = f"login_{uuid.uuid4().hex[:8]}"
 
+    if len(_login_sessions) >= _MAX_LOGIN_SESSIONS:
+        raise HTTPException(
+            status_code=429,
+            detail=(f"已有 {len(_login_sessions)} 个扫码会话在进行中"
+                    f"（上限 {_MAX_LOGIN_SESSIONS}）。请先完成或等待其过期（10 分钟）。"))
+
+    # 资源句柄提到 try 外面：异常分支必须能拿到它们做清理。
+    # 原实现在 except 里直接 return，浏览器既没关、也没进 _login_sessions
+    # （注册发生在截图成功之后），TTL 清理器压根看不见它 → 每次启动失败
+    # 泄漏一个 Chromium + 一个 node 驱动进程。网络慢时用户反复点二维码，
+    # 几分钟就能把内存吃光。
+    pw = browser = None
+    registered = False
     try:
         pw, browser, context = await _launch_browser()
         page = await context.new_page()
@@ -669,6 +826,7 @@ async def login_qrcode_start():
             "page": page, "login_frame": login_frame,
             "status": "waiting", "created_at": time.time(),
         }
+        registered = True
 
         return {
             "session_id": session_id, "status": "waiting",
@@ -680,6 +838,11 @@ async def login_qrcode_start():
         logger.error("QR login start failed: %s", e)
         return {"session_id": session_id, "status": "error",
                 "error": str(e), "message": f"启动登录失败: {e}"}
+    finally:
+        # 只有「没成功交接给 _login_sessions」时才在这里回收；
+        # 成功路径的浏览器要留着等用户扫码，由 TTL/成功回调关闭。
+        if not registered:
+            await _shutdown_browser(pw, browser, label=f"{session_id}/start-failed")
 
 
 @app.get("/api/login/qrcode/status")
@@ -707,17 +870,17 @@ async def login_qrcode_status(session_id: str):
                 _write_login_health("ok", "扫码登录成功")
                 session["status"] = "success"
 
-                try:
-                    await session["browser"].close()
-                    await session["playwright"].stop()
-                except Exception:
-                    pass
+                # 登录态已落盘，浏览器没用了 —— 立刻释放，别等 TTL。
+                await _close_login_session(session_id)
 
                 return {"session_id": session_id, "status": "success",
                         "message": "登录成功！状态已保存"}
 
             if "扫码失败" in content or "登录失败" in content:
                 session["status"] = "failed"
+                # 失败态同样立即回收：原实现只标状态不关浏览器，
+                # 那个 Chromium 要白挂到 TTL 到期（最长 10 分钟）。
+                await _close_login_session(session_id)
                 return {"session_id": session_id, "status": "failed",
                         "message": "登录失败，请重试"}
 
@@ -751,6 +914,7 @@ async def login_debug_page():
     """Debug: dump login page structure. Requires DEBUG_ENDPOINTS=true."""
     if not _DEBUG_ENDPOINTS:
         raise HTTPException(status_code=404, detail="Not found")
+    pw = browser = None
     try:
         pw, browser, context = await _launch_browser()
         page = await context.new_page()
@@ -790,9 +954,6 @@ async def login_debug_page():
         screenshot = await page.screenshot(full_page=False)
         screenshot_b64 = base64.b64encode(screenshot).decode()
 
-        await browser.close()
-        await pw.stop()
-
         return {
             "url": url, "title": title,
             "content_length": len(content),
@@ -803,6 +964,9 @@ async def login_debug_page():
         }
     except Exception as e:
         return {"error": str(e)}
+    finally:
+        # 原来 close 写在 return 之前的正常流里，任一步抛异常就漏一个浏览器。
+        await _shutdown_browser(pw, browser, label="debug-page")
 
 
 @app.post("/api/login/state/upload")

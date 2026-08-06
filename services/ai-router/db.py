@@ -19,7 +19,12 @@ DATA_DIR = Path(os.environ.get("DATA_DIR")
                 or Path(__file__).resolve().parents[2] / "data" / "ai-router")
 DB_PATH = DATA_DIR / "goofish.db"
 
-DATABASE_ENABLED = os.environ.get("POSTGRES_ENABLED", "true").lower() in ("1", "true", "yes", "on")
+# 桌面端固定使用内嵌 SQLite 持久化（AI 调用统计 / 模型配置），不依赖外部数据库。
+# 与 agent-pipeline/db.py 对齐：原逻辑误读 POSTGRES_ENABLED 当开关，而桌面配置里
+# postgres 后端一旦被设为 enabled=false → POSTGRES_ENABLED=false → SQLite 被连带关掉
+# （agent-pipeline 已在 §8.2 BUG-6 修复，ai-router 是当时的漏网项，2026-08-06 补齐）。
+# 改为：SQLite 默认启用，仅当显式 SQLITE_DISABLED=1/true 时才降级。
+DATABASE_ENABLED = os.environ.get("SQLITE_DISABLED", "false").lower() not in ("1", "true", "yes", "on")
 
 _JSON_COLS = set()
 

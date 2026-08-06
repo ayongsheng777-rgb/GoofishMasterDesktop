@@ -1,6 +1,6 @@
-# GoofishMasterDesktop 闲鱼圣手桌面端 v1.0.0-beta.1（测试版）
+# GoofishMasterDesktop 闲鱼圣手桌面端 v1.0.0
 
-> ⚠️ **测试版（Beta）发布**，仅供尝鲜与反馈，不代表最终稳定质量。
+> **v1.0.0 正式稳定版**——在前序测试版全部实测修复的基础上，进一步完成安全加固与稳定性收尾（密钥加密、日志脱敏、浏览器进程回收、单元测试）。
 > 作者是一名线下电脑实体店店主，利用 WorkBuddy 在业余时间开发，欢迎试用并提出问题。
 
 ## 这是什么
@@ -32,6 +32,12 @@
 - 任务中心「已发现数量」恒为 0、飞书「停止/删除/设置」找不到任务（PG→SQLite 参数绑定错位，系统性修复）
 - 模型配置重启丢失 / 扫码二次点击 / 验证器旧名 / 桌面图标崩溃等一并修复
 
+### 🔒 v1.0.0 安全加固与稳定性收尾（本次新增）
+- **密钥本地加密**：`config.json` 中的 AI Key / 飞书 AppSecret 现经 Windows DPAPI 加密落盘（当前用户作用域，无法读取明文），DPAPI 不可用时自动降级并告警
+- **日志脱敏**：运行日志自动遮蔽 AI Key / 飞书 Secret / 闲鱼 Cookie / token，运维日志不再成为泄密面
+- **修复 Playwright 进程泄漏**：扫码登录异常分支未释放 Chromium 进程的问题已修复（曾导致每次登录失败泄漏一个 Chromium + node 进程），并加入浏览器池 TTL 清扫与并发上限保护
+- **测试套件**：新增 `tests/` 单元测试 66 项（配置深合并 / 加密 / 启动编排 / 日志脱敏 / 健康聚合 / 浏览器生命周期），全绿并通过变异测试验证
+
 ## 安装步骤
 
 1. 下载下方 `GoofishMasterDesktop-Setup-1.0.0.exe`（约 580MB）
@@ -60,7 +66,7 @@
 
 | 微信支付 | 支付宝 |
 | --- | --- |
-| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0-beta.1/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0-beta.1/donate-alipay.jpg) |
+| ![微信收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0/donate-wechat.png) | ![支付宝收款](https://github.com/ayongsheng777-rgb/GoofishMasterDesktop/releases/download/v1.0.0/donate-alipay.jpg) |
 
 ---
 
@@ -78,4 +84,4 @@
 
 完整发行说明见仓库 [RELEASE_NOTES.md](RELEASE_NOTES.md)。
 
-**校验信息**：版本 `v1.0.0-beta.1`（2026-08-05 刷新）· 安装包 `GoofishMasterDesktop-Setup-1.0.0.exe` · 约 580 MB · SHA-256 `63f85e6685ece9c81a4b6101aa221d1d2e57b5bf9c0ab4df26a771ee4d1e30b9` · Windows 10/11 x64 · 许可 MIT
+**校验信息**：版本 `v1.0.0`（2026-08-06 发布）· 安装包 `GoofishMasterDesktop-Setup-1.0.0.exe` · 约 580 MB（608,101,372 字节）· SHA-256 `07a6b8e124434b7572a612b58e2656aabade1b29d005807269b508ded97244e1` · Windows 10/11 x64 · 许可 MIT

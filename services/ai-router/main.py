@@ -32,6 +32,20 @@ import rag
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+# 日志脱敏：ai-router 是最容易泄漏 Key 的地方（上游报错常把 Authorization 头
+# 原样回显）。详见 common/logfilter.py。
+try:
+    import sys as _sys
+    from pathlib import Path as _P
+    _r = str(_P(__file__).resolve().parents[2])
+    if _r not in _sys.path:
+        _sys.path.insert(0, _r)
+    from common.logfilter import install as _install_logfilter
+    _install_logfilter()
+except Exception:
+    pass
+
 logger = logging.getLogger("ai-router")
 
 app = FastAPI(title="GoofishMasterDesktop · AI Router", version="2.1.0")
@@ -1398,6 +1412,68 @@ async def get_token_stats():
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "ai-router", "version": "2.1.0"}
+
+
+# ---- 三级健康模型：liveness / readiness（详见 common/health.py） ----
+def _load_health_mod():
+    """延迟导入 common.health（服务子进程 cwd 在自身目录，需回溯项目根）。"""
+    try:
+        import sys as _sys
+        from pathlib import Path as _P
+        _root = str(_P(__file__).resolve().parents[2])
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        from common import health as _h
+        return _h
+    except Exception:
+        return None
+
+
+@app.get("/api/health/live")
+async def health_live():
+    """存活探针：进程在跑即 200，不触碰任何依赖（供看门狗使用）。"""
+    return {"status": "alive", "service": "ai-router"}
+
+
+@app.get("/api/health/ready")
+async def health_ready():
+    """就绪探针：真实探测 SQLite / Chroma / AI provider 配置。"""
+    _h = _load_health_mod()
+    if _h is None:
+        return {"service": "ai-router", "status": "unknown",
+                "reasons": ["common.health 不可用"]}
+
+    async def _chk_db():
+        if not db.DATABASE_ENABLED:
+            return False, "SQLite 已被 SQLITE_DISABLED 显式关闭"
+        await db.fetchval("SELECT 1")
+        return True, str(db.DB_PATH)
+
+    def _chk_rag():
+        st = rag.rag_status() or {}
+        if st.get("enabled"):
+            return True, f"documents={st.get('documents', 0)}"
+        return False, str(st.get("reason") or "未启用")
+
+    def _chk_provider():
+        keys = {
+            "deepseek": os.environ.get("DEEPSEEK_API_KEY", ""),
+            "gemini": os.environ.get("GEMINI_API_KEY", ""),
+            "qwen": os.environ.get("QWEN_API_KEY", ""),
+        }
+        got = [k for k, v in keys.items() if v]
+        if got:
+            return True, "已配置: " + ",".join(got)
+        return False, "未配置任何 AI Key，AI 分析不可用"
+
+    specs = [
+        ("sqlite", _chk_db, True),
+        ("ai_provider", _chk_provider, False),
+        ("chroma_rag", _chk_rag, False),
+    ]
+    report = await _h.gather_report("ai-router", specs, version="2.1.0")
+    return JSONResponse(status_code=200 if report["ready"] else 503,
+                        content=report)
 
 
 # ============ OpenAI-Compatible Passthrough ============

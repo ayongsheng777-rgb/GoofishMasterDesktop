@@ -16,6 +16,21 @@ import monitor
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s")
+
+# 日志脱敏：写盘前遮蔽 AI Key / 飞书 Secret / token（详见 common/logfilter.py）。
+# 必须紧跟 basicConfig——此时 root handler 已存在；uvicorn 后装的 handler 由
+# logfilter 内部的 addHandler 补丁自动覆盖。
+try:
+    import sys as _sys
+    from pathlib import Path as _P
+    _r = str(_P(__file__).resolve().parents[2])
+    if _r not in _sys.path:
+        _sys.path.insert(0, _r)
+    from common.logfilter import install as _install_logfilter
+    _install_logfilter()
+except Exception:  # 脱敏不可用也不能挡住服务启动
+    pass
+
 logger = logging.getLogger("agent-pipeline")
 
 app = FastAPI(title="GoofishMasterDesktop · Agent Pipeline", version="2.1.0")
@@ -1209,6 +1224,68 @@ async def get_last_results(open_id: str = ""):
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "agent-pipeline", "version": "2.1.0"}
+
+
+# ---- 三级健康模型：liveness / readiness（详见 common/health.py） ----
+def _load_health_mod():
+    try:
+        import sys as _sys
+        from pathlib import Path as _P
+        _root = str(_P(__file__).resolve().parents[2])
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+        from common import health as _h
+        return _h
+    except Exception:
+        return None
+
+
+@app.get("/api/health/live")
+async def health_live():
+    """存活探针：进程在跑即 200，不触碰任何依赖（供看门狗使用）。"""
+    return {"status": "alive", "service": "agent-pipeline"}
+
+
+@app.get("/api/health/ready")
+async def health_ready():
+    """就绪探针：探测 SQLite、监控调度器、上游 ai-router / spider 可达性。"""
+    _h = _load_health_mod()
+    if _h is None:
+        return {"service": "agent-pipeline", "status": "unknown",
+                "reasons": ["common.health 不可用"]}
+
+    async def _chk_db():
+        if not db.DATABASE_ENABLED:
+            return False, "SQLite 已被 SQLITE_DISABLED 显式关闭"
+        await db.fetchval("SELECT 1")
+        return True, str(db.DB_PATH)
+
+    def _chk_scheduler():
+        # 调度器线程/任务存活与否决定监控任务是否会被触发
+        for attr in ("is_running", "scheduler_running", "_scheduler_task"):
+            val = getattr(monitor, attr, None)
+            if callable(val):
+                return bool(val()), attr
+            if val is not None:
+                return bool(val), attr
+        return True, "无法探测（视为正常）"
+
+    async def _chk_upstream(url: str, label: str):
+        if not url:
+            return False, f"{label} 地址未配置"
+        async with httpx.AsyncClient(timeout=2.0) as c:
+            r = await c.get(f"{url}/api/health")
+            return r.status_code == 200, f"{label} HTTP {r.status_code}"
+
+    specs = [
+        ("sqlite", _chk_db, True),
+        ("scheduler", _chk_scheduler, True),
+        ("ai_router", lambda: _chk_upstream(AI_ROUTER_URL, "ai-router"), False),
+        ("spider", lambda: _chk_upstream(SPIDER_URL, "spider"), False),
+    ]
+    report = await _h.gather_report("agent-pipeline", specs, version="2.1.0")
+    from fastapi.responses import JSONResponse as _JR
+    return _JR(status_code=200 if report["ready"] else 503, content=report)
 
 
 @app.on_event("startup")

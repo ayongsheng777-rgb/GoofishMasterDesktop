@@ -461,8 +461,17 @@ async def scrape_user_profile(context, user_id: str) -> dict:
     except Exception as e:
         print(f"   [错误] 采集用户 {user_id} 信息时发生错误: {e}")
     finally:
-        page.remove_listener("response", handle_response)
-        await page.close()
+        # finally 里的清理动作自身也可能抛（任务被停止时浏览器已关闭 →
+        # TargetClosedError），一旦抛出会顶掉 try 里的真实异常，排障时只能看到
+        # 一句 "Target closed"。逐个吞掉，保证 page 一定被释放。
+        try:
+            page.remove_listener("response", handle_response)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(page.close(), timeout=10)
+        except Exception:
+            pass
         print(f"   -> 用户 {user_id} 信息采集完成。")
 
     return profile_data
@@ -1217,7 +1226,12 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                         except Exception as e:
                             print(f"   错误: 处理商品详情时发生未知错误: {e}")
                         finally:
-                            await detail_page.close()
+                            # 同上：详情页关闭失败不得掩盖真实异常，也不得
+                            # 让循环中断——否则剩余商品全部丢失。
+                            try:
+                                await asyncio.wait_for(detail_page.close(), timeout=10)
+                            except Exception as ce:
+                                log_time(f"关闭详情页失败（忽略）: {ce}")
                             # --- 修改: 增加关闭页面后的短暂整理时间 ---
                             await random_sleep(2, 4)  # 原来是 (1, 2.5)
 
@@ -1256,7 +1270,22 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 await asyncio.sleep(5)
                 if debug_limit:
                     input("按回车键关闭浏览器...")
-                await browser.close()
+
+                # 逐层显式回收：context → browser，两段都套超时。
+                # 原来只 `await browser.close()` 且不设超时，有两个坑：
+                #  1) 页面卡在 JS 死循环时 CDP 不响应，close() 永久挂起，
+                #     整个采集协程连同 event loop 一起吊死（任务再也不返回）；
+                #  2) 长跑任务里 context 累积的 page/网络缓冲要等 browser 关闭
+                #     才整体释放，先关 context 能更早把内存还给系统。
+                # 外层 `async with async_playwright()` 负责 stop 驱动进程。
+                try:
+                    await asyncio.wait_for(context.close(), timeout=15)
+                except Exception as e:
+                    log_time(f"关闭浏览器上下文失败（忽略）: {e}")
+                try:
+                    await asyncio.wait_for(browser.close(), timeout=15)
+                except Exception as e:
+                    log_time(f"关闭浏览器失败（忽略）: {e}")
 
         return processed_item_count
 

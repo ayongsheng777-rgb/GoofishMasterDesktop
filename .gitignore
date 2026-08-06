@@ -1,11 +1,15 @@
 # 运行时数据（首次启动自动生成）
 data/
-config/config.json
+# 整个 config/ 都不入库：除 config.json 外，密钥加密迁移还会生成
+# config.json.plain.bak（**明文**密钥备份），只忽略 config.json 会把备份提交上去。
+# 配置模板是根目录的 config.example.json，不在此目录内。
+config/
 
 # Python
 .venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # 构建产物
 build/
