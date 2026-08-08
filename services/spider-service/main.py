@@ -31,10 +31,85 @@ except Exception:
 # 瑕疵定义词关键词展开（详见 common/keyword_expander.py）：「摔坏的手机」
 # → 摔坏的手机/摔坏的iphone/屏幕碎的手机/坏的手机。不可用时退回单词行为。
 try:
-    from common.keyword_expander import expand_keyword as _expand_keyword
+    from common.keyword_expander import (
+        expand_keyword as _expand_keyword,
+        classify_keyword as _classify_keyword,
+        extract_residual as _extract_residual,
+        max_variants as _expand_max_variants,
+    )
+    from common import keyword_lexicon_store as _lexicon_store
 except Exception:
     def _expand_keyword(keyword, max_variants=None):  # type: ignore
         return [keyword] if (keyword or "").strip() else []
+
+    def _classify_keyword(keyword):  # type: ignore
+        return {"defect": None, "device": None}
+
+    def _extract_residual(variant):  # type: ignore
+        return ""
+
+    def _expand_max_variants():  # type: ignore
+        return 4
+
+    _lexicon_store = None
+
+
+async def _ai_defect_variants(keyword: str) -> List[str]:
+    """静态词库未命中瑕疵词时的 AI 兜底理解（增量进化的「理解」层）。
+
+    问 ai-router：该关键词是否描述瑕疵/损坏商品？是 → 给口语化损坏搜索词，
+    变体落学习库（下次同词直接静态命中，不再烧 token）；否 → 负缓存 7 天。
+    任何失败（AI 未配置/超时/解析失败）都静默返回 []，绝不阻塞搜索。
+    """
+    if _lexicon_store is None:
+        return []
+    norm = " ".join((keyword or "").lower().split())
+    if not norm:
+        return []
+    cached = _lexicon_store.get_ai_variants(norm)
+    if cached is not None:
+        return cached
+    try:
+        content = (
+            f"二手商品搜索词：{keyword}\n"
+            "请判断该搜索词是否在寻找有瑕疵/损坏的二手商品。如果是，给出 3 个"
+            "闲鱼上描述此类损坏的口语化搜索词变体（如：摔坏、进水、屏幕碎、"
+            "键盘失灵、跑气）；如果不是在找瑕疵品，keywords 返回空列表。")
+        async with httpx.AsyncClient(timeout=12) as client:
+            resp = await client.post(f"{AI_ROUTER_URL}/api/search/keywords",
+                                     json={"query": content})
+        parsed = (resp.json() or {}).get("parsed") or {}
+        variants = [str(v).strip() for v in (parsed.get("keywords") or [])
+                    if str(v).strip()]
+    except Exception as e:
+        logger.debug("AI 瑕疵词兜底失败（忽略）: %r", e)
+        return []
+    variants = variants[: _expand_max_variants()]
+    _lexicon_store.set_ai_variants(norm, variants)
+    # 从 AI 变体反解瑕疵单词入学习库（剥设备词取残余）
+    new_terms = [r for r in (_extract_residual(v) for v in variants) if r]
+    added = _lexicon_store.add_ai_defect_terms(new_terms)
+    if added:
+        logger.info("词库 AI 学习: %s → 新增瑕疵词 %s", keyword, added)
+    return variants
+
+
+def _learn_from_results(keyword: str, results: List[Dict[str, Any]],
+                        defect_context: bool) -> None:
+    """采集结果反哺词库（增量进化的「记忆」层）：命中强化 + 候选挖掘转正。"""
+    if _lexicon_store is None or not results:
+        return
+    try:
+        from common.keyword_expander import DEFECT_FAMILIES
+        known = {f for _c, forms in DEFECT_FAMILIES for f in forms}
+        known |= _lexicon_store.all_known_defect_forms()
+        titles = [str(i.get("title") or "") for i in results if i.get("title")]
+        stats = _lexicon_store.learn_from_titles(titles, known, defect_context)
+        if stats.get("promoted"):
+            logger.info("词库挖掘: 本轮新转正 %d 个瑕疵表述（搜索词=%s）",
+                        stats["promoted"], keyword)
+    except Exception as e:
+        logger.debug("词库学习失败（忽略）: %r", e)
 
 logger = logging.getLogger("spider-service")
 
@@ -241,8 +316,14 @@ async def run_spider_search(request: SearchRequest) -> Dict[str, Any]:
     """
     if _search_lock.locked():
         logger.info("Crawl busy, queued: keyword=%s", request.keyword)
-    # 瑕疵词展开后单次要跑多个变体 query（每个约 8 分钟），超时按变体数放大
-    n_variants = max(1, len(_expand_keyword(request.keyword)))
+    # 瑕疵词展开后单次要跑多个变体 query（每个约 8 分钟），超时按变体数放大；
+    # 静态词库未命中瑕疵词时 AI 兜底可能补足到上限，超时按上限预留（只是上界，
+    # 不影响正常返回速度）
+    static_keywords = _expand_keyword(request.keyword)
+    if _classify_keyword(request.keyword)["defect"] is None:
+        n_variants = max(len(static_keywords), _expand_max_variants())
+    else:
+        n_variants = max(1, len(static_keywords))
     timeout = SPIDER_SEARCH_TIMEOUT * n_variants
     async with _search_lock:
         try:
@@ -294,9 +375,25 @@ async def _scrape_one_keyword(task_config: Dict[str, Any], keyword: str,
 async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
     task_id = f"search_{uuid.uuid4().hex[:8]}"
     keywords = _expand_keyword(request.keyword)
+    # 静态词库（含学习库）未命中瑕疵词 → AI 兜底理解，变体补进本轮搜索
+    ai_used = False
+    if _classify_keyword(request.keyword)["defect"] is None:
+        ai_variants = await _ai_defect_variants(request.keyword)
+        if ai_variants:
+            ai_used = True
+            seen_kw = set(keywords)
+            room = max(0, _expand_max_variants() - len(keywords))
+            for v in ai_variants:
+                if room <= 0:
+                    break
+                if v not in seen_kw:
+                    seen_kw.add(v)
+                    keywords.append(v)
+                    room -= 1
     if len(keywords) > 1:
-        logger.info("Starting search: %s (keyword=%s → 展开 %d 词: %s)",
-                    task_id, request.keyword, len(keywords), keywords)
+        logger.info("Starting search: %s (keyword=%s → 展开 %d 词%s: %s)",
+                    task_id, request.keyword, len(keywords),
+                    "（含 AI 兜底）" if ai_used else "", keywords)
     else:
         logger.info("Starting search: %s (keyword=%s)", task_id, request.keyword)
 
@@ -351,6 +448,12 @@ async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
                                task_id, scrape_error,
                                len(keywords) - keywords.index(kw) - 1)
                 break
+
+        # 采集结果反哺学习词库：命中强化 + （瑕疵语境下）候选挖掘转正
+        _learn_from_results(
+            request.keyword, all_results,
+            defect_context=ai_used or
+            _classify_keyword(request.keyword)["defect"] is not None)
 
         logger.info("Search %s completed: variants=%d, processed=%s, stored=%d",
                     task_id, len(keywords), processed_total, len(all_results))

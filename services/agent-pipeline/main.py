@@ -34,10 +34,20 @@ except Exception:  # 脱敏不可用也不能挡住服务启动
 # 瑕疵定义词关键词展开（详见 common/keyword_expander.py）——此处只用于
 # 按展开变体数放大 spider 同步调用的 HTTP 超时，实际展开在 spider 侧执行。
 try:
-    from common.keyword_expander import expand_keyword as _expand_keyword
+    from common.keyword_expander import (
+        expand_keyword as _expand_keyword,
+        classify_keyword as _classify_keyword,
+        max_variants as _expand_max_variants,
+    )
 except Exception:
     def _expand_keyword(keyword, max_variants=None):  # type: ignore
         return [keyword] if (keyword or "").strip() else []
+
+    def _classify_keyword(keyword):  # type: ignore
+        return {"defect": None, "device": None}
+
+    def _expand_max_variants():  # type: ignore
+        return 4
 
 logger = logging.getLogger("agent-pipeline")
 
@@ -631,9 +641,25 @@ async def _spider_search_with_retry(payload: dict, open_id: str = "") -> dict:
     而不是直接把失败甩给用户。ReadTimeout 不重试（真超时重试大概率再超）。
 
     瑕疵词展开后 spider 单次要顺序采多个变体（每个约 8 分钟），HTTP 超时
-    按变体数放大，避免 spider 还在采、客户端先 ReadTimeout。
+    按变体数放大，避免 spider 还在采、客户端先 ReadTimeout。静态词库未
+    命中瑕疵词时 spider 侧 AI 兜底可能补足到上限，按上限预留（只是上界，
+    不影响正常返回速度）。
     """
-    n_variants = max(1, len(_expand_keyword(payload.get("keyword", ""))))
+    kw = payload.get("keyword", "")
+    if _classify_keyword(kw)["defect"] is None:
+        # AI 兜底的实际变体数查学习库缓存：负缓存=单词；有缓存=按缓存数；
+        # 没见过=保守按上限（只是超时上界，不影响正常返回速度）
+        n_variants = _expand_max_variants()
+        try:
+            from common.keyword_lexicon_store import get_ai_variants
+            norm = " ".join(kw.lower().split())
+            cached = get_ai_variants(norm)
+            if cached is not None:
+                n_variants = max(1, min(_expand_max_variants(), 1 + len(cached)))
+        except Exception:
+            pass
+    else:
+        n_variants = max(1, len(_expand_keyword(kw)))
     timeout = 960 * n_variants
     last_err: Exception = RuntimeError("unreachable")
     for attempt in (1, 2):

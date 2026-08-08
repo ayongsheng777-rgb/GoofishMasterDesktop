@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
 # 词族表（组内互为近义/同义；族的排列顺序 = 跨族展开优先级）
@@ -36,9 +36,27 @@ DEFECT_FAMILIES: List[Tuple[str, List[str]]] = [
             "黑屏", "开不了机", "无法开机"]),
     ("变形", ["变形", "弯曲", "弯了", "压坏", "压扁", "车压了", "压了", "坐弯",
               "坐坏", "挤坏"]),
-    ("进水", ["进水", "泡水", "淋雨", "受潮", "掉水里", "水漏了", "洒饮料",
-              "可乐倒了", "洒了", "溅水", "打湿"]),
+    ("进水", ["进水", "泡水", "淋雨", "受潮", "掉水里", "水漏了", "漏水", "渗漏",
+              "洒饮料", "可乐倒了", "洒了", "溅水", "打湿"]),
+    # 屏幕显示瑕疵（二手验机高频表述：黑点/白点/条纹/划痕/印记）
+    ("屏幕瑕疵", ["屏幕有黑点", "黑点", "白点", "亮点", "坏点", "亮斑", "条纹",
+                "花屏", "烧屏", "透图", "划痕", "印记", "泛黄"]),
+    # 部件级功能失灵（笔记本键盘/触摸板、充电、电池等）
+    ("部件失灵", ["键盘不能用", "键盘失灵", "触摸不灵", "触摸失灵", "触控不灵",
+                "触控失灵", "掉键", "掉了几个键", "按键失灵", "充不进电",
+                "不充电", "电池鼓包", "风扇异响", "接口松动"]),
+    # 充气类商品专属（桨板/充气艇/气球等）
+    ("漏气", ["跑气", "漏气", "慢撒气", "气压不足", "打不进气"]),
+    # 被修补过（二手描述里的隐性瑕疵：补了一块/打过补丁）
+    ("修补", ["补了一块", "打过补丁", "修补过", "补过", "粘过", "焊过"]),
 ]
+
+# 弱瑕疵词：单独出现在关键词里语义歧义大（「条纹衬衫」「护手霜」不含设备词时
+# 不应触发裸词配对）。只有关键词里同时出现设备词时才按瑕疵处理。
+WEAK_DEFECT_FORMS = {
+    "划痕", "条纹", "印记", "泛黄", "压了", "洒了", "弯了", "补过", "粘过",
+    "异响", "死机", "不亮",
+}
 
 # 设备名词族：每族第一个词是代表词；族内其余为同义/常见别名
 DEVICE_FAMILIES: List[Tuple[str, List[str]]] = [
@@ -52,6 +70,7 @@ DEVICE_FAMILIES: List[Tuple[str, List[str]]] = [
     ("游戏机", ["游戏机", "switch", "ps5"]),
     ("台式机", ["台式电脑", "台式机", "电脑主机"]),
     ("无人机", ["无人机", "大疆"]),
+    ("桨板", ["桨板", "充气桨板", "冲浪板", "皮划艇", "充气艇", "橡皮艇"]),
 ]
 
 # 裸瑕疵词（关键词里没有设备名词）时默认配对的设备词
@@ -71,6 +90,45 @@ def _max_variants() -> int:
         return max(1, int(os.environ.get("KEYWORD_EXPAND_MAX", "4")))
     except ValueError:
         return 4
+
+
+def max_variants() -> int:
+    """公开版：当前生效的变体上限（spider 拼 AI 变体时用）。"""
+    return _max_variants()
+
+
+# ---------------------------------------------------------------------------
+# 学习词库合并（内置词库打底 + keyword_lexicon_store 里 AI/挖到的新词）
+# ---------------------------------------------------------------------------
+
+def _merge_learned(builtin: List[Tuple[str, List[str]]],
+                   learned: List[Tuple[str, List[str]]]
+                   ) -> List[Tuple[str, List[str]]]:
+    merged = [(canon, list(forms)) for canon, forms in builtin]
+    index = {canon: i for i, (canon, _f) in enumerate(merged)}
+    for fam, terms in learned:
+        if fam in index:
+            i = index[fam]
+            merged[i][1].extend(t for t in terms if t not in merged[i][1])
+        else:
+            merged.append((fam, list(terms)))
+    return merged
+
+
+def _effective_defect_families() -> List[Tuple[str, List[str]]]:
+    try:
+        from common.keyword_lexicon_store import learned_defect_families
+        return _merge_learned(DEFECT_FAMILIES, learned_defect_families())
+    except Exception:  # 学习库不可用不挡路，退回内置词库
+        return DEFECT_FAMILIES
+
+
+def _effective_device_families() -> List[Tuple[str, List[str]]]:
+    try:
+        from common.keyword_lexicon_store import learned_device_families
+        return _merge_learned(DEVICE_FAMILIES, learned_device_families())
+    except Exception:
+        return DEVICE_FAMILIES
 
 
 # ---------------------------------------------------------------------------
@@ -102,12 +160,13 @@ def _find_span(text: str, families: List[Tuple[str, List[str]]]
     return best
 
 
-def _defect_variants(family_idx: int, matched_form: str) -> List[str]:
+def _defect_variants(families: List[Tuple[str, List[str]]],
+                     family_idx: int, matched_form: str) -> List[str]:
     """瑕疵词变体序列：原词 → 其他族代表词（按词族表序）→ 本族其余近义词。"""
-    canon, forms = DEFECT_FAMILIES[family_idx]
+    canon, forms = families[family_idx]
     seq: List[str] = [matched_form]
-    for i, (other_canon, other_forms) in enumerate(DEFECT_FAMILIES):
-        if i != family_idx:
+    for i, (other_canon, other_forms) in enumerate(families):
+        if i != family_idx and other_forms:
             seq.append(other_forms[0])
     seq.extend(f for f in forms if f != matched_form)
     # 去重保序
@@ -121,7 +180,7 @@ def _defect_variants(family_idx: int, matched_form: str) -> List[str]:
 
 def _device_variants(family_idx: int, matched_form: str) -> List[str]:
     """设备词变体序列：原词 → 本族同义词（不跨族——用户指明了设备类别）。"""
-    _canon, forms = DEVICE_FAMILIES[family_idx]
+    _canon, forms = _effective_device_families()[family_idx]
     return [matched_form] + [f for f in forms if f != matched_form]
 
 
@@ -144,11 +203,41 @@ def _replace_spans(text: str, defect_span, device_span,
     return out
 
 
+def classify_keyword(keyword: str) -> Dict[str, Optional[str]]:
+    """分类关键词：返回 {'defect': 命中的瑕疵词形|None, 'device': 命中的设备词形|None}。
+
+    spider 据此决定是否调 AI 兜底（defect 为 None 时）以及本轮是否为
+    瑕疵语境（挖掘候选词的开关）。弱瑕疵词在无设备词时不算命中。
+    """
+    text = _normalize(keyword)
+    if not text:
+        return {"defect": None, "device": None}
+    defect = _find_span(text, _effective_defect_families())
+    device = _find_span(text, _effective_device_families())
+    if defect and device and not (device[2] <= defect[1] or defect[2] <= device[1]):
+        device = None
+    if defect and defect[3] in WEAK_DEFECT_FORMS and device is None:
+        defect = None
+    return {"defect": defect[3] if defect else None,
+            "device": device[3] if device else None}
+
+
+def extract_residual(variant: str) -> str:
+    """从（AI 给出的）变体 query 中剥离设备词与的/了/空格胶，得到残余的
+    瑕疵表述——用于把 AI 变体反解成可入库的瑕疵单词。"""
+    text = _normalize(variant)
+    device = _find_span(text, _effective_device_families())
+    if device:
+        text = (text[:device[1]] + text[device[2]:]).strip()
+    return text.strip("的了 ")
+
+
 def expand_keyword(keyword: str, max_variants: Optional[int] = None) -> List[str]:
     """把含瑕疵定义词的关键词展开为多个搜索词（原词优先，去重，限量）。
 
     不触发展开的情形原样返回 [keyword]：
     - 关键词不含任何瑕疵定义词（无论有没有设备词）
+    - 仅命中弱瑕疵词且关键词里没有设备词（「条纹衬衫」类歧义）
     - KEYWORD_EXPAND_ENABLED=false
     """
     raw = (keyword or "").strip()
@@ -159,12 +248,18 @@ def expand_keyword(keyword: str, max_variants: Optional[int] = None) -> List[str
     limit = max_variants or _max_variants()
 
     text = _normalize(raw)
-    defect = _find_span(text, DEFECT_FAMILIES)
-    device = _find_span(text, DEVICE_FAMILIES)
+    defect_families = _effective_defect_families()
+    device_families = _effective_device_families()
+    defect = _find_span(text, defect_families)
+    device = _find_span(text, device_families)
 
     # 瑕疵词与设备词 span 重叠时（理论上罕见），以瑕疵词为准放弃设备展开
     if defect and device and not (device[2] <= defect[1] or defect[2] <= device[1]):
         device = None
+
+    # 弱瑕疵词单独出现歧义大（「条纹衬衫」），无设备词时不展开
+    if defect and device is None and defect[3] in WEAK_DEFECT_FORMS:
+        return [raw]
 
     if defect is None:
         return [raw]  # 无瑕疵定语：不展开（含纯设备词）
@@ -180,7 +275,7 @@ def expand_keyword(keyword: str, max_variants: Optional[int] = None) -> List[str
                 break
         return out
 
-    d_variants = _defect_variants(defect[0], defect[3])
+    d_variants = _defect_variants(defect_families, defect[0], defect[3])
     v_variants = _device_variants(device[0], device[3])
 
     # 交叉展开：原词 → 交替取设备同义词（原瑕疵）与瑕疵近义词（原设备），

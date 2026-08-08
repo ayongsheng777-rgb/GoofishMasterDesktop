@@ -464,6 +464,18 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 **同日补充（词库扩编）**：`DEFECT_FAMILIES` 增收口语/事件型表述——摔坏族+摔了/磕了/掉地上，屏幕破族+裂屏/屏裂/外屏碎/内屏坏，坏族+不亮/死机/黑屏/开不了机，变形族+压坏/压扁/车压了/坐弯/挤坏，进水族+淋雨/受潮/掉水里/水漏了/洒饮料/可乐倒了/溅水（卖家实际写法多为事件描述而非书面词）。`_replace_spans` 加「的」去重（替换词以的结尾且原文紧跟的→吃掉原文的，防「坏的的耳机」）。上限维持 4 不提：每变体约 8 分钟，4 词≈32 分钟已顶满监控 30 分钟轮次，调大用 `KEYWORD_EXPAND_MAX` 并同步放宽监控间隔。测试 24 项 + 全量 104 passed；已同步 dist/release。
 
+**同日补充 2（词库三层增量进化，需求：像 AI 一样理解记忆）**：
+
+| 层 | 机制 | 位置 |
+|---|---|---|
+| 内置词库 | 新族：屏幕瑕疵（黑点/白点/条纹/划痕/印记/烧屏）、部件失灵（键盘不能用/触摸不灵/掉键/充不进电/电池鼓包）、漏气（跑气/漏气，桨板类）、修补（补了一块/打过补丁）；设备族+桨板。**弱词守卫**：划痕/条纹/印记等歧义词只在关键词含设备词时触发，防「条纹衬衫」误展开 | `common/keyword_expander.py` |
+| AI 理解层 | 静态词库未命中瑕疵词 → spider 调 ai-router `/api/search/keywords` 判定是否找瑕疵品并给变体（12s 超时、失败静默不阻塞、复用现有 prompt 零 ai-router 改动）；变体补进本轮搜索（补齐到上限），残余瑕疵词反解入库——下次同词静态命中零 token。负缓存 7 天（AI 判非瑕疵的词不重复问） | `services/spider-service/main.py` `_ai_defect_variants` |
+| 挖掘记忆层 | 每次瑕疵语境搜索后扫描结果标题：已入库词命中 → hits+1 强化；信号字窗口（坏碎裂漏弯压…前后 3 汉字）提取未知表述进候选池，**≥2 次自动转正**入库；特征字粗规则归族（气→漏气、漏泡洒→进水、划斑纹点线→屏幕瑕疵…） | `common/keyword_lexicon_store.py` |
+
+- **存储**：`data/keyword_lexicon.json`（env `KEYWORD_LEXICON_PATH` 或 `DATA_DIR` 上级改址），原子写 + mtime 缓存，spider 写 / pipeline 读安全
+- **超时**：静态未命中时 pipeline/spider 超时按上限预留（已缓存的词按实际变体数收紧）
+- **测试**：`tests/test_keyword_lexicon_store.py` 16 项（新族/弱词守卫/AI 词合并/族推断/候选转正/命中强化/缓存持久化）+ 全量 124 passed；dist/release 已同步
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对；被拦截时**改名代替删除**（`Rename-Item xxx xxx_old_时间戳`），残留集中后统一清。
