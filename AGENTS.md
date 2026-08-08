@@ -472,9 +472,14 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 | AI 理解层 | 静态词库未命中瑕疵词 → spider 调 ai-router `/api/search/keywords` 判定是否找瑕疵品并给变体（12s 超时、失败静默不阻塞、复用现有 prompt 零 ai-router 改动）；变体补进本轮搜索（补齐到上限），残余瑕疵词反解入库——下次同词静态命中零 token。负缓存 7 天（AI 判非瑕疵的词不重复问） | `services/spider-service/main.py` `_ai_defect_variants` |
 | 挖掘记忆层 | 每次瑕疵语境搜索后扫描结果标题：已入库词命中 → hits+1 强化；信号字窗口（坏碎裂漏弯压…前后 3 汉字）提取未知表述进候选池，**≥2 次自动转正**入库；特征字粗规则归族（气→漏气、漏泡洒→进水、划斑纹点线→屏幕瑕疵…） | `common/keyword_lexicon_store.py` |
 
-- **存储**：`data/keyword_lexicon.json`（env `KEYWORD_LEXICON_PATH` 或 `DATA_DIR` 上级改址），原子写 + mtime 缓存，spider 写 / pipeline 读安全
+- **存储**：`data/keyword_lexicon.json`（env `KEYWORD_LEXICON_PATH` 或 `DATA_DIR` 上级改址），原子写 + 按路径+mtime 缓存，spider 写 / pipeline 读安全
 - **超时**：静态未命中时 pipeline/spider 超时按上限预留（已缓存的词按实际变体数收紧）
 - **测试**：`tests/test_keyword_lexicon_store.py` 16 项（新族/弱词守卫/AI 词合并/族推断/候选转正/命中强化/缓存持久化）+ 全量 124 passed；dist/release 已同步
+
+**压测实锤修复（2026-08-08 全链路压测，`tests/test_stress_full_chain.py`）**：
+1. **挖掘复合词污染**：标题「摔坏的手机」被挖掘转正成瑕疵词形后，`_find_span` 最长匹配吞掉设备位（device=None）→ 裸词配对出「摔坏的手机的手机」。修复：挖掘与 AI 双入口加 `_is_composite_query` 守卫——已知瑕疵词的残余若是设备词则拒收（「慢漏气」类修饰新词形放行）。
+2. **学习库缓存串路径**：`load()` 在文件不存在时返回上一路径的旧缓存（多实例/测试切换 KEYWORD_LEXICON_PATH 时数据互窜）。修复：缓存按路径隔离。
+3. **pytest 环境坑**：系统 Temp 下的临时目录回收被 safe-delete 拦截（fail-closed），进程退出码恒 1 且管道下输出不可见——跑全量用 `-v > 日志文件` 再以末尾 summary 行为准，勿用 `--basetemp`（启动删旧目录被拦全灭）。
 
 ## 8.14 2026-08-08 搜索/监控发布时间设定（最近 N 天）
 

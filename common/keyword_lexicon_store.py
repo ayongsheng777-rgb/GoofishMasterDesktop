@@ -56,17 +56,23 @@ def _empty() -> Dict[str, Any]:
 
 
 def load() -> Dict[str, Any]:
-    """读取词库（mtime 缓存；文件不存在/损坏返回空结构）。"""
+    """读取词库（按路径+mtime 缓存；文件不存在/损坏返回空结构）。
+
+    缓存必须按路径隔离：调用方可能通过 KEYWORD_LEXICON_PATH/DATA_DIR
+    切换词库文件（多实例/测试），否则 A 路径的旧数据会泄漏给 B 路径。
+    """
     path = lexicon_path()
+    spath = str(path)
     try:
         mtime = path.stat().st_mtime
     except OSError:
         with _LOCK:
-            if _CACHE["data"] is None:
-                _CACHE["data"] = _empty()
+            if _CACHE["data"] is None or _CACHE.get("path") != spath:
+                _CACHE.update(data=_empty(), path=spath, mtime=None)
             return _CACHE["data"]
     with _LOCK:
-        if _CACHE["mtime"] != mtime or _CACHE["data"] is None:
+        if (_CACHE.get("path") != spath or _CACHE["mtime"] != mtime
+                or _CACHE["data"] is None):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
                 base = _empty()
@@ -74,7 +80,7 @@ def load() -> Dict[str, Any]:
                 _CACHE["data"] = base
             except Exception:
                 _CACHE["data"] = _empty()
-            _CACHE["mtime"] = mtime
+            _CACHE.update(path=spath, mtime=mtime)
         return _CACHE["data"]
 
 
@@ -87,7 +93,7 @@ def _save(data: Dict[str, Any]) -> None:
     os.replace(tmp, path)
     with _LOCK:
         _CACHE["data"] = data
-        _CACHE["mtime"] = path.stat().st_mtime
+        _CACHE.update(path=str(path), mtime=path.stat().st_mtime)
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +159,31 @@ def _builtin_defect_forms() -> set:
         return set()
 
 
+def _all_device_forms() -> set:
+    try:
+        from common.keyword_expander import DEVICE_FAMILIES
+        forms = {f for _c, fs in DEVICE_FAMILIES for f in fs}
+    except Exception:
+        forms = set()
+    for _fam, terms in (load().get("learned_devices") or {}).items():
+        forms.update(terms)
+    return forms
+
+
+def _is_composite_query(term: str, known_forms: set) -> bool:
+    """「已知瑕疵词 + 设备词」的复合 query（如「摔坏的手机」）不应学为瑕疵词——
+    学进去匹配时会吞掉设备位，展开出「摔坏的手机的手机」。
+    但「慢漏气」= 已知词形+修饰语，是合法新表述，放行。"""
+    devices = _all_device_forms()
+    for k in known_forms:
+        if len(k) < 2 or k not in term:
+            continue
+        residual = term.replace(k, "").strip("的了 ")
+        if residual in devices:
+            return True
+    return False
+
+
 def add_ai_defect_terms(terms: List[str]) -> List[str]:
     """AI 学到的瑕疵表述立即转正入库。返回实际新增的词。"""
     added: List[str] = []
@@ -166,6 +197,9 @@ def add_ai_defect_terms(terms: List[str]) -> List[str]:
         for term in terms:
             term = (term or "").strip()
             if not (_MINED_MIN_LEN <= len(term) <= 8) or term in known:
+                continue
+            # 复合 query（已知瑕疵词+设备词）不入库；修饰性新词形放行
+            if _is_composite_query(term, known):
                 continue
             fam = infer_family(term)
             defects.setdefault(fam, []).append({
@@ -213,6 +247,10 @@ def learn_from_titles(titles: List[str], known_forms: set,
                     if not (_MINED_MIN_LEN <= len(phrase) <= _MINED_MAX_LEN):
                         continue
                     if phrase in known_forms:
+                        continue
+                    # 复合 query 不学习（「摔坏的手机」学进去会吞设备位，
+                    # 展开出「摔坏的手机的手机」）；修饰性新词形放行
+                    if _is_composite_query(phrase, known_forms):
                         continue
                     c = candidates.get(phrase)
                     if c is None:

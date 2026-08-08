@@ -103,6 +103,26 @@ class TestMiningAndReinforce:
         entries = store.load()["learned_defects"]["屏幕瑕疵"]
         assert entries[0]["hits"] == 2  # 入库 1 + 强化 1
 
+    def test_composite_phrase_with_known_form_rejected(self):
+        """回归：「摔坏的手机」= 已知瑕疵词+设备词，学进去会吞设备位，
+        展开出「摔坏的手机的手机」（压测实锤的污染 bug）"""
+        known = set(BUILTIN_FORMS) | store.all_known_defect_forms()
+        for _ in range(3):  # 出现多次也不得转正
+            store.learn_from_titles(["共用语 摔坏的手机"], known, True)
+        assert "摔坏的手机" not in {
+            t for _f, ts in store.learned_defect_families() for t in ts}
+        # 展开结构不被破坏：设备位仍是「手机」
+        assert expand_keyword("摔坏的手机")[0] == "摔坏的手机"
+
+    def test_cache_isolated_by_path(self, tmp_path, monkeypatch):
+        """回归：load() 缓存按路径隔离——文件不存在时不得返回
+        另一个路径的旧缓存（压测实锤的跨测试污染）"""
+        store.set_ai_variants("泡水", ["泡水的手机"])  # 写入路径 A
+        monkeypatch.setenv("KEYWORD_LEXICON_PATH",
+                           str(tmp_path / "other" / "lex.json"))  # 切到路径 B
+        assert store.get_ai_variants("泡水") is None  # 拿不到 A 的数据
+        assert store.learned_defect_families() == []
+
 
 class TestAiCache:
     def test_roundtrip(self):
