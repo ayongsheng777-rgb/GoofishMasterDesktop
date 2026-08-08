@@ -104,3 +104,40 @@ class TestDefectPlusDevice:
     def test_dedup(self):
         out = expand_keyword("进水的相机")
         assert len(out) == len(set(out))
+
+
+class TestEventStyleDefects:
+    """事件型瑕疵表述：车压了/淋雨了/可乐倒了等口语写法也要识别展开。"""
+
+    def test_car_crushed_maps_to_deform_family(self):
+        out = expand_keyword("车压了的手机")
+        assert out[0] == "车压了的手机"
+        assert any("iphone" in v for v in out)
+        # 跨族代表词应出现（如 摔坏/屏幕破/坏的/进水 之一）
+        assert any(any(d in v for d in ("摔坏", "屏幕破", "坏的", "进水"))
+                   for v in out[1:])
+
+    def test_rain_drenched_maps_to_water_family(self):
+        out = expand_keyword("淋雨了的笔记本电脑")
+        assert out[0] == "淋雨了的笔记本电脑"
+        assert any("macbook" in v or "笔记本" in v for v in out[1:])
+
+    def test_spilled_drink_maps_to_water_family(self):
+        out = expand_keyword("可乐倒了的手机", max_variants=2)
+        assert out[0] == "可乐倒了的手机"
+        assert "iphone" in out[1]
+
+    def test_bare_event_word_pairs_devices(self):
+        out = expand_keyword("泡水", max_variants=2)
+        assert out == ["泡水的手机", "泡水的iphone"]
+
+    def test_longest_form_wins_over_shorter(self):
+        # 「车压了」整体匹配，而不是只匹配「压了」
+        out = expand_keyword("车压了的平板", max_variants=1)
+        assert out == ["车压了的平板"]
+
+    def test_no_double_de_after_replacement(self):
+        # 「掉地上」→「坏的」时原文的「的」被吃掉，不出「坏的的耳机」
+        out = expand_keyword("掉地上的耳机")
+        assert all("的的" not in v for v in out)
+        assert any(v == "坏的耳机" for v in out)

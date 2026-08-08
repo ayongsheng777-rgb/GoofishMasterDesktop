@@ -462,6 +462,8 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 **验证**：`tests/test_keyword_expander.py` 18 项（裸瑕疵/双轴覆盖/限量/env 开关/无的拼接/后缀保留/最长匹配/去重）+ 全量 pytest 98 passed 4 skipped（JobObject 沙箱环境性跳过）+ py_compile 全过；变更文件已 cp 同步 `dist/` 与 `release/` 的 `_internal`。**未构建安装包、未热更已安装实例、未 push**（§0.5 流程待用户拍板）。
 
+**同日补充（词库扩编）**：`DEFECT_FAMILIES` 增收口语/事件型表述——摔坏族+摔了/磕了/掉地上，屏幕破族+裂屏/屏裂/外屏碎/内屏坏，坏族+不亮/死机/黑屏/开不了机，变形族+压坏/压扁/车压了/坐弯/挤坏，进水族+淋雨/受潮/掉水里/水漏了/洒饮料/可乐倒了/溅水（卖家实际写法多为事件描述而非书面词）。`_replace_spans` 加「的」去重（替换词以的结尾且原文紧跟的→吃掉原文的，防「坏的的耳机」）。上限维持 4 不提：每变体约 8 分钟，4 词≈32 分钟已顶满监控 30 分钟轮次，调大用 `KEYWORD_EXPAND_MAX` 并同步放宽监控间隔。测试 24 项 + 全量 104 passed；已同步 dist/release。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对；被拦截时**改名代替删除**（`Rename-Item xxx xxx_old_时间戳`），残留集中后统一清。
