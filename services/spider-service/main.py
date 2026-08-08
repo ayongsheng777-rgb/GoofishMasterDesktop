@@ -164,6 +164,7 @@ class SearchRequest(BaseModel):
     free_shipping: bool = False
     region: Optional[str] = None
     new_publish_option: Optional[str] = None
+    publish_within_days: Optional[int] = None  # 只采最近 N 天发布（1-14）
     ai_analysis: bool = True
     notify: bool = True
     open_id: Optional[str] = None
@@ -372,6 +373,37 @@ async def _scrape_one_keyword(task_config: Dict[str, Any], keyword: str,
     return results, scrape_error, processed_count
 
 
+# 闲鱼「新发布」筛选项文案（PC Web 搜索页）。UI 点击只是尽力而为，
+# 真正保证时效的是采集后的 _filter_by_publish_time 二次过滤。
+def _publish_option_for_days(days: int) -> Optional[str]:
+    if days <= 1:
+        return "一天内"
+    if days <= 3:
+        return "三天内"
+    if days <= 7:
+        return "七天内"
+    return "十四天内"
+
+
+def _filter_by_publish_time(results: List[Dict[str, Any]], days: int) -> tuple:
+    """只保留最近 N 天发布的商品。发布时间缺失/不可解析的保留（召回优先，
+    宁多勿漏）；返回 (kept, dropped_count)。"""
+    from datetime import datetime, timedelta
+    cutoff = datetime.now() - timedelta(days=days)
+    kept: List[Dict[str, Any]] = []
+    dropped = 0
+    for item in results:
+        ts = (item.get("publish_time") or "").strip()
+        try:
+            if datetime.strptime(ts, "%Y-%m-%d %H:%M") < cutoff:
+                dropped += 1
+                continue
+        except (ValueError, TypeError):
+            pass  # 「未知时间」等保留
+        kept.append(item)
+    return kept, dropped
+
+
 async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
     task_id = f"search_{uuid.uuid4().hex[:8]}"
     keywords = _expand_keyword(request.keyword)
@@ -397,6 +429,15 @@ async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
     else:
         logger.info("Starting search: %s (keyword=%s)", task_id, request.keyword)
 
+    # 发布时间设定：publish_within_days（1-14 天）优先映射为闲鱼「新发布」
+    # 筛选项；显式传 new_publish_option 时以显式值为准
+    publish_days = None
+    if request.publish_within_days:
+        publish_days = max(1, min(int(request.publish_within_days), 14))
+    new_publish_opt = request.new_publish_option
+    if publish_days and not new_publish_opt:
+        new_publish_opt = _publish_option_for_days(publish_days)
+
     task_config = {
         "task_name": task_id,
         "keyword": request.keyword,
@@ -407,7 +448,7 @@ async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
         "max_price": str(request.max_price) if request.max_price is not None else None,
         "free_shipping": request.free_shipping,
         "region": request.region,
-        "new_publish_option": request.new_publish_option,
+        "new_publish_option": new_publish_opt,
         "enabled": True,
         "account_state_file": "",
     }
@@ -455,6 +496,16 @@ async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
             defect_context=ai_used or
             _classify_keyword(request.keyword)["defect"] is not None)
 
+        # 发布时间二次过滤：UI 点击是尽力而为（可能超时静默失败），
+        # 这里按解析出的 publish_time 保证「最近 N 天」真正生效
+        if publish_days and all_results:
+            before = len(all_results)
+            all_results, dropped = _filter_by_publish_time(
+                all_results, publish_days)
+            if dropped:
+                logger.info("Search %s: 发布时间过滤（最近%d天）%d → %d 条",
+                            task_id, publish_days, before, len(all_results))
+
         logger.info("Search %s completed: variants=%d, processed=%s, stored=%d",
                     task_id, len(keywords), processed_total, len(all_results))
 
@@ -470,6 +521,7 @@ async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
             "status": "completed",
             "keyword": request.keyword,
             "expanded_keywords": keywords,
+            "publish_within_days": publish_days,
             "results_count": len(all_results),
             "results": all_results[:50],
             "login_expired": scrape_error == "login_expired",

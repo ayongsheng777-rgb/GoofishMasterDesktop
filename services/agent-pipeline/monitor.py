@@ -98,8 +98,9 @@ async def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
     row = await db.fetchrow(
         """INSERT INTO monitor_tasks
            (task_id, name, keyword, max_price, min_price, seller_type,
-            exclude_keywords, interval_minutes, notify_open_id, created_by, min_score)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            exclude_keywords, interval_minutes, notify_open_id, created_by, min_score,
+            publish_within_days)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
            RETURNING task_id, name, keyword, max_price, interval_minutes, status""",
         task_id, name, payload.get("keyword", ""),
         payload.get("max_price"), payload.get("min_price"),
@@ -108,6 +109,8 @@ async def create_task(payload: Dict[str, Any]) -> Dict[str, Any]:
         int(payload.get("interval_minutes") or 30),
         payload.get("notify_open_id"), payload.get("created_by"),
         int(payload.get("min_score") or 60),
+        (max(1, min(int(payload["publish_within_days"]), 14))
+         if payload.get("publish_within_days") else None),
     )
     if row is None:
         # DB unavailable — report honestly instead of pretending success
@@ -339,6 +342,8 @@ async def _run_task_once(task: Dict[str, Any]) -> None:
             "personal_only": task.get("seller_type") == "personal",
             "max_price": int(task["max_price"]) if task.get("max_price") else None,
             "min_price": int(task["min_price"]) if task.get("min_price") else None,
+            "publish_within_days": (int(task["publish_within_days"])
+                                    if task.get("publish_within_days") else None),
             "ai_analysis": False,
             "open_id": task.get("notify_open_id") or "",
         }, open_id=task.get("notify_open_id") or "")

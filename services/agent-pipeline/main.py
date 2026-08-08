@@ -903,6 +903,10 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
     personal_only = data.get("personal_only", False)
     exclude_keywords = [k.lower() for k in (data.get("exclude_keywords") or []) if k]
     max_pages = max(1, min(int(data.get("max_pages", 1)), 10))  # 用户可控，上限 10 页
+    # 发布时间设定：只采最近 N 天发布（1-14 天）
+    publish_within_days = data.get("publish_within_days")
+    if publish_within_days:
+        publish_within_days = max(1, min(int(publish_within_days), 14))
 
     if not keyword:
         raise HTTPException(status_code=400, detail="关键词不能为空")
@@ -950,6 +954,7 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
             "max_pages": max_pages,
             "personal_only": personal_only,
             "max_price": max_price,
+            "publish_within_days": publish_within_days,
             "ai_analysis": False,  # We'll do analysis ourselves
             "open_id": open_id,
         }, open_id=open_id)

@@ -110,6 +110,7 @@ CREATE TABLE IF NOT EXISTS monitor_tasks (
     status TEXT DEFAULT 'running',
     found_count INTEGER DEFAULT 0,
     last_run TEXT,
+    publish_within_days INTEGER,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 );
@@ -191,12 +192,30 @@ async def _get_conn():
         await _conn.execute("PRAGMA busy_timeout=20000")
         await _conn.execute("PRAGMA synchronous=NORMAL")
         await _conn.executescript(_SCHEMA)
+        await _migrate(_conn)
         logger.info("SQLite connected: %s", DB_PATH)
         return _conn
     except Exception as e:
         logger.warning("SQLite unavailable, persistence disabled: %s", e)
         _disabled = True
         return None
+
+
+async def _migrate(conn) -> None:
+    """存量库的增量列迁移（CREATE TABLE IF NOT EXISTS 不会给老表加新列）。"""
+    new_cols = {
+        "monitor_tasks": ["publish_within_days INTEGER"],
+    }
+    for table, cols in new_cols.items():
+        try:
+            rows = await conn.execute_fetchall(f"PRAGMA table_info({table})")
+            existing = {r[1] for r in rows}
+            for col in cols:
+                if col.split()[0] not in existing:
+                    await conn.execute(f"ALTER TABLE {table} ADD COLUMN {col}")
+                    logger.info("DB migrate: %s 新增列 %s", table, col)
+        except Exception as e:
+            logger.warning("DB migrate %s 失败（忽略，不影响启动）: %s", table, e)
 
 
 def _row_to_dict(row) -> Optional[dict]:

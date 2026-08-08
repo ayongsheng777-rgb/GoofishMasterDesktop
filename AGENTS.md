@@ -476,6 +476,22 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 - **超时**：静态未命中时 pipeline/spider 超时按上限预留（已缓存的词按实际变体数收紧）
 - **测试**：`tests/test_keyword_lexicon_store.py` 16 项（新族/弱词守卫/AI 词合并/族推断/候选转正/命中强化/缓存持久化）+ 全量 124 passed；dist/release 已同步
 
+## 8.14 2026-08-08 搜索/监控发布时间设定（最近 N 天）
+
+**需求**：搜索与监控支持「只采最近发布的信息」。指令语法「找 摔坏的手机 最近3天」「监控 iphone 7天内发布」。
+
+**实施（双保险：UI 筛选尽力而为 + 采集后二次过滤保证生效）**：
+
+| 层 | 改动 |
+|---|---|
+| `feishu-agent/command_parser.py` | `_parse_conditions` 解析「最近N天 / N天内（发布）」→ `publish_within_days`（clamp 1-14）；`_CONDITION_PATTERNS` 增时间词+页数（页数原只剥词尾，句中残留）剥离防污染搜索词；AI 提炼回包的关键词同样剥时间词 |
+| `feishu-agent/main.py` | 搜索确认回执显示「最近N天发布」；`_create_monitor_task` 转发字段+回执显示发布时限 |
+| `agent-pipeline/main.py` | `pipeline_search` 接收 clamp 后透传 spider |
+| `agent-pipeline/monitor.py` + `db.py` | `monitor_tasks` 新增 `publish_within_days` 列（`_migrate` 用 PRAGMA 守卫的 ALTER，老库自动补列）；`_run_task_once` 透传 |
+| `spider-service/main.py` | `SearchRequest.publish_within_days`；映射闲鱼「新发布」选项（1→一天内/≤3→三天内/≤7→七天内/≤14→十四天内）填进 task_config（显式 `new_publish_option` 优先）；`_filter_by_publish_time` 按解析出的 `publish_time`（%Y-%m-%d %H:%M）二次过滤，「未知时间」保留（召回优先） |
+
+**注意**：闲鱼 UI 点击筛选可能超时静默失败（scraper 原有容错），时效正确性由二次过滤兜底。测试 `tests/test_publish_time_filter.py` 7 项 + 全量 131 passed；dist/release 已同步。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对；被拦截时**改名代替删除**（`Rename-Item xxx xxx_old_时间戳`），残留集中后统一清。

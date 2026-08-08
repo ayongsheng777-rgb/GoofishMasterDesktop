@@ -206,6 +206,12 @@ def _parse_conditions(text: str, result: Dict[str, Any]) -> None:
     if page_match:
         result["max_pages"] = _clamp_pages(int(page_match.group(1)))
 
+    # 发布时间设定：「最近3天」「3天内（发布）」→ publish_within_days（1-14）
+    time_match = (re.search(r'(?:最近|近)\s*(\d+)\s*天', text)
+                  or re.search(r'(\d+)\s*天内\s*(?:发布)?', text))
+    if time_match:
+        result["publish_within_days"] = max(1, min(int(time_match.group(1)), 14))
+
 
 def _clamp_pages(n: int) -> int:
     """Clamp page count to 1-10, warn if overridden."""
@@ -263,6 +269,11 @@ _CONDITION_PATTERNS = [
     # 指令动词残留（裸文本/倒装语序：「排除翻新机 找 iphone15」剥排除后「找」才到开头，
     # 故放列表末尾且允许前导空格）
     r'^\s*(?:找|搜索|查找|寻找|搜|收)\s+',
+    # 发布时间限定（「最近3天」「3天内发布」）：已被结构化，残留会污染搜索词
+    r'(?:最近|近)\s*\d+\s*天(?:内)?\s*(?:发布)?\s*(?:的)?',
+    r'\d+\s*天内\s*(?:发布)?\s*(?:的)?',
+    # 页数（句中位置也要剥：「找 X 3页 最近1天」时间词剥掉后「3页」落中间）
+    r'\d+\s*[页頁]',
     r'个人\s*(?:卖家|卖|闲置)', r'商家|店铺|专营',
     r'全新|未拆', r'二手|用过',
     r'无矿卡|不要矿卡|非矿', r'无维修|没修过',
@@ -307,6 +318,9 @@ async def ai_refine_command(text: str, cmd: Dict[str, Any]) -> Dict[str, Any]:
 
         # 关键词：非空、长度合理、与原文不同才覆盖（防幻觉扩张）
         kw = str(parsed.get("keyword") or "").strip(" ,，。")
+        # 时间限定词绝不进搜索词（AI 可能把「最近3天」留在提炼结果里）
+        kw = re.sub(r'(?:最近|近)\s*\d+\s*天(?:内)?\s*(?:发布)?\s*(?:的)?', '', kw)
+        kw = re.sub(r'\d+\s*天内\s*(?:发布)?\s*(?:的)?', '', kw).strip(" ,，。")
         if kw and len(kw) <= 30 and kw != text:
             if kw != cmd.get("keyword"):
                 logger.info("AI 提炼关键词: '%s' → '%s'（正则 '%s' 被覆盖）",
@@ -356,6 +370,7 @@ def format_help() -> str:
 • 全新 / 二手
 • 无矿卡 / 无维修 / 不要X（配件/刷机/主机…，AI 自动扩展同义词）
 • N页 — 采集页数（默认1页/约30件，上限10页；每页+约8分钟）
+• 最近N天 / N天内发布 — 只采最近发布的商品（1-14天）
 
 📋 管理指令：
 • 任务列表 — 查看所有任务

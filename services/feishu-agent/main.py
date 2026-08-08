@@ -171,7 +171,8 @@ async def _dispatch_pipeline_search(keyword: str, open_id: str = "",
                                      max_price: Optional[int] = None,
                                      personal_only: bool = False,
                                      exclude_keywords: Optional[list] = None,
-                                     max_pages: int = 1) -> None:
+                                     max_pages: int = 1,
+                                     publish_within_days: Optional[int] = None) -> None:
     """Dispatch a search request to the agent pipeline."""
     try:
         # pipeline 内部链路长（采集约4-8分钟+AI分析），超时给足；
@@ -184,6 +185,7 @@ async def _dispatch_pipeline_search(keyword: str, open_id: str = "",
                 "personal_only": personal_only,
                 "exclude_keywords": exclude_keywords or [],
                 "max_pages": max_pages,
+                "publish_within_days": publish_within_days,
             })
             data = resp.json()
             # pipeline 以 200 + success:False 返回业务失败（如采集超时），
@@ -227,7 +229,8 @@ async def _dispatch_pipeline_search(keyword: str, open_id: str = "",
 async def _create_monitor_task(keyword: str, max_price: Optional[int],
                                 open_id: str, min_price: Optional[int] = None,
                                 personal_only: bool = False,
-                                exclude_keywords: Optional[list] = None) -> str:
+                                exclude_keywords: Optional[list] = None,
+                                publish_within_days: Optional[int] = None) -> str:
     """Create a persistent monitor task via agent-pipeline (Postgres-backed)."""
     try:
         async with httpx.AsyncClient(timeout=15) as client:
@@ -239,6 +242,7 @@ async def _create_monitor_task(keyword: str, max_price: Optional[int],
                 "exclude_keywords": exclude_keywords or [],
                 "interval_minutes": 30,
                 "min_score": 60,
+                "publish_within_days": publish_within_days,
                 "notify_open_id": open_id,
                 "created_by": open_id,
             })
@@ -252,9 +256,10 @@ async def _create_monitor_task(keyword: str, max_price: Optional[int],
 
     task = data.get("task", {})
     price_text = f"，价格上限 ¥{max_price}" if max_price else ""
+    time_text = f"\n发布时限: 只推最近 {publish_within_days} 天发布" if publish_within_days else ""
     return (f"✅ 监控任务已创建（已持久化，重启不丢失）\n"
             f"任务ID: {task.get('task_id', '')}\n"
-            f"关键词: {keyword}{price_text}\n"
+            f"关键词: {keyword}{price_text}{time_text}\n"
             f"监控间隔: 30分钟\n"
             f"推送条件: AI评分 ≥ 60 分\n\n"
             f"发现符合条件的商品时会自动推送通知")
@@ -529,6 +534,8 @@ async def handle_message(payload: dict) -> Optional[str]:
             conditions.append("排除矿卡")
         if cmd.get("exclude_keywords"):
             conditions.append(f"排除:{'/'.join(cmd['exclude_keywords'])}")
+        if cmd.get("publish_within_days"):
+            conditions.append(f"最近{cmd['publish_within_days']}天发布")
 
         cond_text = f" ({', '.join(conditions)})" if conditions else ""
 
@@ -540,6 +547,7 @@ async def handle_message(payload: dict) -> Optional[str]:
             personal_only=cmd.get("seller_type") == "personal",
             exclude_keywords=cmd.get("exclude_keywords"),
             max_pages=cmd.get("max_pages", 1),
+            publish_within_days=cmd.get("publish_within_days"),
         ))
 
         max_pages = cmd.get("max_pages", 1)
@@ -559,7 +567,8 @@ async def handle_message(payload: dict) -> Optional[str]:
         return await _create_monitor_task(
             keyword=keyword, max_price=max_price, open_id=open_id,
             personal_only=cmd.get("seller_type") == "personal",
-            exclude_keywords=cmd.get("exclude_keywords"))
+            exclude_keywords=cmd.get("exclude_keywords"),
+            publish_within_days=cmd.get("publish_within_days"))
 
     if action == "list_tasks":
         return await _list_monitor_tasks()
