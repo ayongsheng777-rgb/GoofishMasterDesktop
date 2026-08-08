@@ -448,6 +448,20 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 **v1.1.4 最终验证矩阵（全绿）**：4/4 就绪探针 healthy；监控时间戳本地时区（last_run 20:58 = 实际 20:58）；config 跨 3 次覆盖安装保留；CLI stop 真全停；WAL 关停收编。版本号双处 1.1.4（.iss + APP_VERSION）。产物：`installer/GoofishMasterDesktop-Setup-1.1.4.exe`（608,360,113 B）。**已按 §0.5 闸门经用户同意后同步**：commit `39431cb` + tag v1.1.4 已推送，Release v1.1.4 已建并上传安装包（gh CLI，先建空 Release 再传资产——`gh release create` 带资产时上传失败会回滚删 Release，且本机经代理上传 580MB 约 15 分钟）。
 
+## 8.13 2026-08-08 瑕疵定义词关键词展开（搜索/监控共用）
+
+**需求**：搜索/监控「坏的」「摔坏」「屏幕破」「变形」这类瑕疵定语关键词时，按定语×设备名词交叉展开实际采集词——如「摔坏的手机」→「摔坏的手机 / 摔坏的iphone / 屏幕破的手机 / 摔坏的苹果手机」，裸瑕疵词「坏的」→「坏的手机 / 坏的iphone / 坏的笔记本电脑 / 坏的平板」。
+
+**实施**（用户拍板：双向展开，上限 4 个变体）：
+
+| # | 位置 | 改动 |
+|---|------|------|
+| 1 | `common/keyword_expander.py`（新增） | 瑕疵词族（摔坏/屏幕破/坏/变形/进水，组内近义+跨族代表词）× 设备词族（手机/iphone/笔记本/macbook/平板/ipad 等 10 族）双向展开；原词优先、去重、限量 4；span 替换保留原始拼接（的/无的/后缀如「64g」）；裸瑕疵词配对 `DEFAULT_DEVICES` 且不保留原词（单独搜索全是噪音）；无瑕疵词原样返回。开关 `KEYWORD_EXPAND_ENABLED=false`、上限 `KEYWORD_EXPAND_MAX`（默认 4） |
+| 2 | `services/spider-service/main.py` | `_run_spider_search_locked` 拆出 `_scrape_one_keyword`，同一把采集锁内逐变体顺序采集（浏览器池自动复用），按 item_id/url/title 去重合并，每条打 `_matched_keyword` 标；`login_expired`/`risk_control` 立即中止剩余变体；返回 `expanded_keywords`；`run_spider_search` 超时按变体数放大（1500s×n）。搜索/监控共用此入口 → 监控任务零改动自动生效；「停止搜索」cancel 沿原链路传播不受影响 |
+| 3 | `services/agent-pipeline/main.py` | `_spider_search_with_retry` 的 httpx 超时 960s→960s×变体数（防 spider 还在采、客户端先 ReadTimeout）；空结果响应透出 `expanded_keywords`；日志记录展开明细 |
+
+**验证**：`tests/test_keyword_expander.py` 18 项（裸瑕疵/双轴覆盖/限量/env 开关/无的拼接/后缀保留/最长匹配/去重）+ 全量 pytest 98 passed 4 skipped（JobObject 沙箱环境性跳过）+ py_compile 全过；变更文件已 cp 同步 `dist/` 与 `release/` 的 `_internal`。**未构建安装包、未热更已安装实例、未 push**（§0.5 流程待用户拍板）。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对；被拦截时**改名代替删除**（`Rename-Item xxx xxx_old_时间戳`），残留集中后统一清。

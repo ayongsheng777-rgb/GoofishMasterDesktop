@@ -31,6 +31,14 @@ try:
 except Exception:  # 脱敏不可用也不能挡住服务启动
     pass
 
+# 瑕疵定义词关键词展开（详见 common/keyword_expander.py）——此处只用于
+# 按展开变体数放大 spider 同步调用的 HTTP 超时，实际展开在 spider 侧执行。
+try:
+    from common.keyword_expander import expand_keyword as _expand_keyword
+except Exception:
+    def _expand_keyword(keyword, max_variants=None):  # type: ignore
+        return [keyword] if (keyword or "").strip() else []
+
 logger = logging.getLogger("agent-pipeline")
 
 app = FastAPI(title="GoofishMasterDesktop · Agent Pipeline", version="2.1.0")
@@ -621,11 +629,16 @@ async def _spider_search_with_retry(payload: dict, open_id: str = "") -> dict:
     （2026-08-02 19:51 实测：监控采集 28/30 时崩溃，监控+搜索双任务同时
     RemoteProtocolError）。连接级失败 → 等 spider 恢复健康后自动重试一次，
     而不是直接把失败甩给用户。ReadTimeout 不重试（真超时重试大概率再超）。
+
+    瑕疵词展开后 spider 单次要顺序采多个变体（每个约 8 分钟），HTTP 超时
+    按变体数放大，避免 spider 还在采、客户端先 ReadTimeout。
     """
+    n_variants = max(1, len(_expand_keyword(payload.get("keyword", ""))))
+    timeout = 960 * n_variants
     last_err: Exception = RuntimeError("unreachable")
     for attempt in (1, 2):
         try:
-            async with httpx.AsyncClient(timeout=960) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(f"{SPIDER_URL}/api/search/sync", json=payload)
                 return resp.json()
         except _SPIDER_RETRYABLE as e:
@@ -970,6 +983,10 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
     # 走到这 = 采集全程登录健康 → 清告警限流键（恢复后再次失效要能重新告警）
     await _clear_login_alerts()
 
+    expanded = spider_data.get("expanded_keywords") or []
+    if len(expanded) > 1:
+        logger.info("搜索词展开: '%s' → %s", keyword, expanded)
+
     results = spider_data.get("results", [])
     if not results:
         await _save_last_search({
@@ -977,12 +994,16 @@ async def pipeline_search(data: dict, background_tasks: BackgroundTasks):
             "time": time.strftime("%Y-%m-%d %H:%M"),
             "status": "done", "total": 0, "recommended": 0,
         })
-        return {
+        resp = {
             "success": True,
             "keyword": keyword,
             "total": 0,
             "message": "未找到相关商品",
         }
+        if len(expanded) > 1:
+            resp["expanded_keywords"] = expanded
+            resp["message"] = f"未找到相关商品（已展开搜索：{'、'.join(expanded)}）"
+        return resp
 
     # Step 1.5: blacklist filter + user exclude keywords（如「不要配件」）
     blacklist = await monitor.get_blacklist()

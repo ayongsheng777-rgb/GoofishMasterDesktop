@@ -28,6 +28,14 @@ try:
 except Exception:
     pass
 
+# 瑕疵定义词关键词展开（详见 common/keyword_expander.py）：「摔坏的手机」
+# → 摔坏的手机/摔坏的iphone/屏幕碎的手机/坏的手机。不可用时退回单词行为。
+try:
+    from common.keyword_expander import expand_keyword as _expand_keyword
+except Exception:
+    def _expand_keyword(keyword, max_variants=None):  # type: ignore
+        return [keyword] if (keyword or "").strip() else []
+
 logger = logging.getLogger("spider-service")
 
 app = FastAPI(title="GoofishMasterDesktop · Spider Service", version="2.0.0")
@@ -233,26 +241,64 @@ async def run_spider_search(request: SearchRequest) -> Dict[str, Any]:
     """
     if _search_lock.locked():
         logger.info("Crawl busy, queued: keyword=%s", request.keyword)
+    # 瑕疵词展开后单次要跑多个变体 query（每个约 8 分钟），超时按变体数放大
+    n_variants = max(1, len(_expand_keyword(request.keyword)))
+    timeout = SPIDER_SEARCH_TIMEOUT * n_variants
     async with _search_lock:
         try:
             return await asyncio.wait_for(
-                _run_spider_search_locked(request), timeout=SPIDER_SEARCH_TIMEOUT)
+                _run_spider_search_locked(request), timeout=timeout)
         except asyncio.TimeoutError:
             logger.error("搜索 %s 超过 %ss 仍未返回，强制取消并释放采集锁",
-                         request.keyword, SPIDER_SEARCH_TIMEOUT)
+                         request.keyword, timeout)
             return {
                 "task_id": f"search_timeout_{request.keyword}",
                 "status": "failed",
                 "keyword": request.keyword,
-                "error": f"采集超时（>{SPIDER_SEARCH_TIMEOUT:.0f}s），已取消",
+                "error": f"采集超时（>{timeout:.0f}s），已取消",
                 "results_count": 0,
                 "results": [],
             }
 
 
+async def _scrape_one_keyword(task_config: Dict[str, Any], keyword: str,
+                              scraper_mod) -> tuple:
+    """采集单个（变体）关键词并读回本轮新增记录。
+
+    返回 (results, scrape_error, processed_count)。scrape_error 为
+    login_expired / risk_control / None（业务级失败码透出）。
+    """
+    from src.scraper import scrape_xianyu
+
+    task_config = dict(task_config, keyword=keyword)
+    baseline_id = await _get_max_result_id(keyword)
+    processed_count = await scrape_xianyu(task_config, debug_limit=0)
+
+    scrape_error = scraper_mod.LAST_SCRAPE_ERROR
+    if scrape_error == "login_expired":
+        _write_login_health("expired", "采集时被重定向到 passport 登录页")
+    elif not scrape_error:
+        _write_login_health("ok")
+
+    results = await _load_keyword_results(keyword, since_id=baseline_id)
+    if not results and processed_count == 0:
+        # 重试兜底：本轮无新发现（V1 链接去重）时返回近期库存记录
+        results = await _load_keyword_results(
+            keyword, since_id=0, limit=30, newest_first=True)
+        if results:
+            logger.info("无新增，回退返回 %d 条近期库存记录: %s",
+                        len(results), keyword)
+    return results, scrape_error, processed_count
+
+
 async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
     task_id = f"search_{uuid.uuid4().hex[:8]}"
-    logger.info("Starting search: %s (keyword=%s)", task_id, request.keyword)
+    keywords = _expand_keyword(request.keyword)
+    if len(keywords) > 1:
+        logger.info("Starting search: %s (keyword=%s → 展开 %d 词: %s)",
+                    task_id, request.keyword, len(keywords), keywords)
+    else:
+        logger.info("Starting search: %s (keyword=%s)", task_id, request.keyword)
 
     task_config = {
         "task_name": task_id,
@@ -279,50 +325,50 @@ async def _run_spider_search_locked(request: SearchRequest) -> Dict[str, Any]:
             task_config["ai_prompt_text"] = prompt_file.read_text(encoding="utf-8")
 
     try:
-        from src.scraper import scrape_xianyu
         from src import scraper as scraper_mod
-        # 记录基线：只读回本次新入库的记录（增量读回）
-        baseline_id = await _get_max_result_id(request.keyword)
 
-        # V1 engine returns a processed COUNT and persists records itself
-        # (SQLite via result_storage_service); read the records back.
-        processed_count = await scrape_xianyu(task_config, debug_limit=0)
+        all_results: List[Dict[str, Any]] = []
+        seen_keys: set = set()
+        scrape_error: Optional[str] = None
+        processed_total = 0
 
-        # 业务级失败码透出（登录失效/风控），让调用方分清「真0结果」与「登录过期」
-        scrape_error = scraper_mod.LAST_SCRAPE_ERROR
-        if scrape_error == "login_expired":
-            _write_login_health("expired", "采集时被重定向到 passport 登录页")
-        elif not scrape_error:
-            # 采集全程无登录错误 = 会话有效（含合法的去重后 0 新增）
-            _write_login_health("ok")
+        # 逐变体采集（同一锁内顺序执行，浏览器池自动复用实例）；
+        # 登录失效/风控立即中止剩余变体——继续采只会加重风控。
+        for kw in keywords:
+            results, scrape_error, processed = await _scrape_one_keyword(
+                task_config, kw, scraper_mod)
+            processed_total += processed or 0
+            for item in results:
+                dedup_key = (item.get("item_id") or item.get("url")
+                             or item.get("title") or "")
+                if not dedup_key or dedup_key in seen_keys:
+                    continue
+                seen_keys.add(dedup_key)
+                item["_matched_keyword"] = kw  # 记录命中变体，便于排查
+                all_results.append(item)
+            if scrape_error in ("login_expired", "risk_control"):
+                logger.warning("Search %s: %s，中止剩余 %d 个变体",
+                               task_id, scrape_error,
+                               len(keywords) - keywords.index(kw) - 1)
+                break
 
-        results = await _load_keyword_results(request.keyword, since_id=baseline_id)
+        logger.info("Search %s completed: variants=%d, processed=%s, stored=%d",
+                    task_id, len(keywords), processed_total, len(all_results))
 
-        # 重试兜底：本轮无新发现（V1 链接去重）时，返回最近的库存记录，
-        # 避免用户失败后重试同一关键词反而拿到"未找到商品"
-        if not results and processed_count == 0:
-            results = await _load_keyword_results(
-                request.keyword, since_id=0, limit=30, newest_first=True)
-            if results:
-                logger.info("Search %s: 无新增，回退返回 %d 条近期库存记录",
-                            task_id, len(results))
-
-        logger.info("Search %s completed: processed=%s, stored=%d",
-                    task_id, processed_count, len(results))
-
-        _state["results_cache"].extend(results)
+        _state["results_cache"].extend(all_results)
         if len(_state["results_cache"]) > 1000:
             _state["results_cache"] = _state["results_cache"][-500:]
 
-        if request.ai_analysis and results:
-            _spawn_bg(_send_to_pipeline(results, request.keyword, request.open_id))
+        if request.ai_analysis and all_results:
+            _spawn_bg(_send_to_pipeline(all_results, request.keyword, request.open_id))
 
         return {
             "task_id": task_id,
             "status": "completed",
             "keyword": request.keyword,
-            "results_count": len(results),
-            "results": results[:50],
+            "expanded_keywords": keywords,
+            "results_count": len(all_results),
+            "results": all_results[:50],
             "login_expired": scrape_error == "login_expired",
             "risk_control": scrape_error == "risk_control",
         }
