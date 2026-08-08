@@ -497,6 +497,19 @@ cd D:\WorkBuddy\GoofishMasterDesktop
 
 **注意**：闲鱼 UI 点击筛选可能超时静默失败（scraper 原有容错），时效正确性由二次过滤兜底。测试 `tests/test_publish_time_filter.py` 7 项 + 全量 131 passed；dist/release 已同步。
 
+## 8.15 2026-08-08 v1.1.5 收尾（打包 + 热更 + 版本号 + 4 提交同步）
+
+**本轮四连提交（均已 push main）**：`6f56b51`（§8.13 双向展开）→ `8432906`（词库扩编）→ `7db9966`（三层进化）→ `b37544a`（§8.14 时间设定）→ `8b23948`（全链路压测修复）。
+
+**打包（Inno Setup，产物 `installer/GoofishMasterDesktop-Setup-1.1.5.exe`，约 635s 编译）**：
+- PyInstaller onedir 重建（`_internal/` 已含 `keyword_expander.py` + `keyword_lexicon_store.py`），`APP_VERSION=1.1.5`。
+- 已运行实例热更新：`D:\GoofishMasterDesktop\_internal` cp 9 个数据文件（common ×3、spider-service/main.py、agent-pipeline ×3、feishu-agent ×2），**重启实例生效**。
+- `release/GoofishMasterDesktop/` 已 robocopy 同步。
+
+**版本号双处同步（.iss `MyAppVersion` + config.py `APP_VERSION` = 1.1.5）**：本提交收口。
+
+**闸门状态**：当前零已知 BUG；用户口头「执行吧」已授权 push（§0.5）。
+
 ## 9. 维护纪律（血泪坑，必读）
 
 - **禁止**用 `Remove-Item -Recurse` / `rm -rf` 批量删项目树——易误删且触发安全删除批量确认拦截。删除改用 PowerShell `-LiteralPath` 单目标 + 先核对；被拦截时**改名代替删除**（`Rename-Item xxx xxx_old_时间戳`），残留集中后统一清。
